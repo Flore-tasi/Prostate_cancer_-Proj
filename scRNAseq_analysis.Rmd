@@ -1,0 +1,842 @@
+---
+title: "Prost_scRNAseq_script"
+author: "G.E.Flore"
+date: "2025-01-23"
+output: html_document
+---
+# Installing the clusterProfiler package
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("clusterProfiler")
+
+```
+# Install other packages
+```{r}
+install.packages("ggplot2")
+install.packages("dplyr")
+install.packages("clusterProfiler")
+install.packages("org.Hs.eg.db")
+install.packages("enrichplot")
+install.packages("EnhancedVolcano")
+install.packages("patchwork")
+```
+# Install other packages again
+```{r}
+installed.packages()["org.Hs.eg.db", ]
+```
+# Load library
+```{r}
+library(org.Hs.eg.db)
+```
+# Install
+```{r}
+installed.packages()["clusterProfiler", ]
+```
+# Load
+```{r}
+library(clusterProfiler)
+```
+# Install
+```{r}
+installed.packages()["enrichplot", ]
+```
+# Load
+```{r}
+library(enrichplot)
+```
+# Install
+```{r}
+installed.packages()["EnhancedVolcano", ]
+```
+# Load
+```{r}
+library(EnhancedVolcano)
+```
+# Install
+```{r}
+installed.packages()["Seurat", ]
+```
+# Load
+```{r}
+library(Seurat)
+```
+# Load data
+```{r}
+data_raw <- read.table("C:/Users/LENOVO/Desktop/scRNAseq _data/data.raw.matrix.txt", header = TRUE, sep = "\t", row.names = 1)
+```
+# Create Seurat object
+```{r}
+raw_object <- CreateSeuratObject(counts = data_raw)
+```
+# Calculate percentage of mitochondrila genes
+```{r}
+raw_object[["percent.mt"]] <- PercentageFeatureSet(raw_object, pattern = "^MT-")
+```
+#Visualize QC metrics
+```{r}
+VlnPlot(raw_object, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+# Scatter plot to detect outliers
+```{r}
+FeatureScatter(raw_object, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+```
+# Subset data to keep only high quality counts
+```{r}
+filtered_object <- subset(
+  raw_object,
+  subset = nFeature_RNA > 200 & nFeature_RNA < 5000 &
+           nCount_RNA > 500 & nCount_RNA < 30000)
+```
+# Normalize data
+```{r}
+raw_object <- NormalizeData(raw_object, normalization.method = "LogNormalize", scale.factor = 30000)
+```
+# Identify Highly variable features
+```{r}
+raw_object <- FindVariableFeatures(raw_object, selection.method = "vst", nfeatures = 2000)
+```
+# Visualize highly variable features
+```{r}
+VariableFeaturePlot(raw_object)
+```
+# Centre and scale the data to prepare for PCA
+```{r}
+raw_object <- ScaleData(raw_object, features = VariableFeatures(object = raw_object))
+```
+# Perform PCA to reduce dimentionality with principal components analysis(PCA)
+```{r}
+raw_object <- RunPCA(raw_object, features = VariableFeatures(object = raw_object))
+```
+# Visualize PCA results
+```{r}
+ElbowPlot(raw_object)
+```
+# Cluster cells with resolution of 0.5
+```{r}
+raw_object <- FindNeighbors(raw_object, dims = 1:10)
+raw_object <- FindClusters(raw_object, resolution = 0.5) 
+```
+# Run UMAP to visuslize cells in @D space
+```{r}
+raw_object <- RunUMAP(raw_object, dims = 1:10)
+```
+# Visualize UMAP
+```{r}
+DimPlot(raw_object, reduction = "umap", label = TRUE)
+```
+# find marker genes for each cluster to determine their identities
+```{r}
+cluster_markers <- FindAllMarkers(raw_object, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+```
+# View top markers for each cluster
+```{r}
+head(cluster_markers)
+```
+# Express markers for each cluster
+```{r}
+C0.M <- FindMarkers(raw_object, ident.1 = 0, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc", only.pos = TRUE)
+C1.M <- FindMarkers(raw_object, ident.1 = 1, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc", only.pos = TRUE)
+C2.M <- FindMarkers(raw_object, ident.1 = 2, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc", only.pos = TRUE)
+C3.M <- FindMarkers(raw_object, ident.1 = 3, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C4.M <- FindMarkers(raw_object, ident.1 = 4, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C5.M <- FindMarkers(raw_object, ident.1 = 5, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C6.M <- FindMarkers(raw_object, ident.1 = 6, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C7.M <- FindMarkers(raw_object, ident.1 = 7, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C8.M <- FindMarkers(raw_object, ident.1 = 8, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C9.M <- FindMarkers(raw_object, ident.1 = 9, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C10.M <- FindMarkers(raw_object, ident.1 = 10, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C11.M <- FindMarkers(raw_object, ident.1 = 11, min.pct= 0.25, logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C12.M <- FindMarkers(raw_object, ident.1 = 12, min.pct=
+0.25,logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C13.M <- FindMarkers(raw_object, ident.1 = 13, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C14.M <- FindMarkers(raw_object, ident.1 = 14, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C15.M <- FindMarkers(raw_object, ident.1 = 15, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C16.M <- FindMarkers(raw_object, ident.1 = 16, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C17.M <- FindMarkers(raw_object, ident.1 = 17, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C18.M <- FindMarkers(raw_object, ident.1 = 18, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C19.M <- FindMarkers(raw_object, ident.1 = 19, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+C20.M <- FindMarkers(raw_object, ident.1 = 20, min.pct= 0.25,  logfc.threshold = 0.25,test.use = "roc",only.pos = TRUE)
+
+```
+# Install package rLang
+```{r}
+install.packages("rlang")
+```
+# Load rlang
+```{r}
+library(rlang)
+```
+# Install tidyverse
+```{r}
+install.packages("tidyverse")
+```
+# Load tidyverse
+```{r}
+library(tidyverse)
+```
+
+# define another function using dplyr
+```{r}
+Extract_Top_Markers <- function(marker_dataframe, num_genes, group_by, rank_by, gene_column) {
+  marker_dataframe %>%
+    dplyr::group_by(across(all_of(group_by))) %>% 
+    dplyr::arrange(desc(across(all_of(rank_by)))) %>% 
+    dplyr::slice_head(n = num_genes) %>% 
+    dplyr::ungroup() %>% 
+    dplyr::select(all_of(gene_column), everything())
+}
+```
+# find top 5 markers for each cluster
+```{r}
+top_5_presto <- Extract_Top_Markers(
+  marker_dataframe = cluster_markers,
+  num_genes = 5,
+  group_by = "cluster",
+  rank_by = "avg_log2FC",
+  gene_column = "gene"
+)
+```
+# find top 2 markers for each cluster
+```{r}
+top_2_presto <- Extract_Top_Markers(
+  marker_dataframe = cluster_markers,
+  num_genes = 2,
+  group_by = "cluster",
+  rank_by = "avg_log2FC",
+  gene_column = "gene"
+)
+```
+# Install devtools
+```{r}
+install.packages("devtools")
+devtools::install_github("satijalab/seurat")
+```
+# Load library
+```{r}
+library(Seurat)
+```
+# Top 2 markers
+```{r}
+top_2_markers <- cluster_markers %>%
+  group_by(cluster) %>%
+  top_n(n = 2, wt = avg_log2FC)
+```
+# Extract the gene names
+```{r}
+top_genes <- top_2_markers$gene
+```
+# Heatmap for the top2markers
+```{r}
+DoHeatmap(object = raw_object, features = top_genes) +
+  scale_fill_gradientn(colors = c("blue", "white", "red"))
+```
+# Violin plot
+```{r}
+VlnPlot(object = raw_object, features = top_genes 	, group.by = "seurat_clusters", pt.size = 0.1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+# Violin plot for specific genes
+```{r}
+VlnPlot(object = raw_object, 
+        features = c("OGN", "NAALADL2-AS2", "CD3G", "GZMK"), 
+        group.by = "seurat_clusters", 
+        pt.size = 0.1) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+# Dot plot for the top2markers
+```{r}
+DotPlot(object = raw_object, features = top_genes, group.by = "seurat_clusters") +
+  scale_color_gradientn(colors = c("blue", "white", "red")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+# Features plots 1
+```{r}
+FeaturePlot(raw_object, features = c("KRT5", "KRT8", "AR"))
+```
+# feature plot 2 for basal cells: KRT5,KRT14,TP63 
+```{r}
+FeaturePlot(raw_object, features = c("KRT5", "KRT14", "TP63"))
+```
+# Feature plot 3 for luminal cells: KRT8,KRT18,AR,KLK3 (PSA),NKX3-1
+```{r}
+FeaturePlot(raw_object, features = c("KRT8", "KRT18", "KLK3", "NKX3-1", "AR"))
+```
+# feature plot 4: Luminal progenitors TACSTD2 (TROP2),KRT4 
+```{r}
+FeaturePlot(raw_object, features = c("TACSTD2", "KRT4"))
+```
+# Feature plot for stroma cells ( Fibroblasts: DCN,ACTA2, COL1A1)
+```{r}
+FeaturePlot(raw_object, features = c("DCN", "ACTA2", "COL1A1"))
+```
+# Feature plot for stroma ( endothelial cells: PECAM1 (CD31),VWF )
+```{r}
+FeaturePlot(raw_object, features = c("CD31", "VWF"))
+```
+# feature plot for immune cells ( Macrphages: CD68,CSF1R)
+```{r}
+FeaturePlot(raw_object, features = c("CD68", "CSF1R"))
+```
+# Feature plot for immune( Tcells: CD3D,CD8A,CD4)
+```{r}
+FeaturePlot(raw_object, features = c("CD3D", "CD8A", "CD4"))
+```
+# feature plot for immune B cells ( MS4A1 (CD20),CD79A)
+```{r}
+FeaturePlot(raw_object, features = c("MS4A1 (CD20)", "CD79A"))
+```
+# Feature plot for immune Mast cells: TPSAB1,KIT
+```{r}
+FeaturePlot(raw_object, features = c("TPSAB1", "KIT"))
+```
+# feature plot for neuroendocrine cells CHGA,SYP,ENO2
+```{r}
+FeaturePlot(raw_object, features = c("CHGA", "SYP", "ENO2"))
+```
+# feature plots for progenitor/stem cells : PROM1 (CD133),ALDH1A1,BMI1 
+```{r}
+FeaturePlot(raw_object, features = c("PROM1 (CD133)", "ALDH1A1", "BMI1"))
+```
+# Another feature map
+```{r}
+FeaturePlot(raw_object, features = c("NAALADL2-AS2", "OGN"))
+```
+
+# Save prostate markers as dataframe
+```{r}
+prostate_markers <- data.frame(
+  gene = c("KRT5", "KRT14", "TP63", "KRT8", "KRT18", "AR", "KLK3", "NKX3-1",
+           "DCN", "ACTA2", "COL1A1", "TAGLN", "MYH11", "PECAM1", "VWF",
+           "CD68", "CSF1R", "CD3D", "CD8A", "CD4", "MS4A1", "CD79A", "TPSAB1",
+           "KIT", "CHGA", "SYP", "ENO2", "PROM1", "ALDH1A1", "BMI1"),
+  cell_type = c("Basal", "Basal", "Basal", "Luminal", "Luminal", "Luminal", "Luminal", "Luminal",
+                "Fibroblast", "Smooth Muscle", "Fibroblast", "Smooth Muscle", "Smooth Muscle", "Endothelial", "Endothelial",
+                "Macrophage", "Macrophage", "T Cell", "T Cell", "T Cell", "B Cell", "B Cell", "Mast Cell",
+                "Mast Cell", "Neuroendocrine", "Neuroendocrine", "Neuroendocrine", "Progenitor", "Progenitor", "Progenitor")
+)
+```
+# Load Dplyr
+```{r}
+library(dplyr)
+```
+# Is extract_top_marker in dataframe?
+```{r}
+class(Extract_Top_Markers)
+```
+# Assign FindAllMarker output to a dataframe
+```{r}
+Extract_Top_Markers <- FindAllMarkers(
+  object = raw_object,
+  only.pos = TRUE,
+  min.pct = 0.25,
+  logfc.threshold = 0.25
+)
+```
+# Check the dataframe
+```{r}
+str(Extract_Top_Markers)
+```
+
+# Find overlapping markers by using inner-join from dplr
+```{r}
+cross_referenced <- Extract_Top_Markers %>%
+  inner_join(prostate_markers, by = "gene")
+```
+# Assign cell types to clusters
+```{r}
+cell_type_annotation <- cross_referenced %>%
+  group_by(cluster, cell_type) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+```
+# Annotate clusters
+```{r}
+raw_object$cell_type <- cell_type_annotation$cell_type
+```
+
+# Umap/tSNE plot with cell labels: Reannotate clusters with cell tpyes
+```{r}
+raw_object <- RenameIdents(raw_object, `0` = "Luminal", `1` = "Tcells", `2` = "Luminal",
+    `3` = "Luminal", `4` = "Luminal", `5` = "Luminal", `6` = "Endothelial cells", `7` = "Luminal", `8` = "Luminal", `9` = "Luminal",
+    `10` = " macrophages", `11` = "Fibroblasts cells", `12` = "Luminal", `13` = "Luminal", `14` = "Luminal", `15` = "Endothelial cells", `16` = "Luminal/Basal", `17` = "Bcells", `18` = "Luminal", `19` = "Fibroblasts cells", `20` = "Basal/Fibroblasts")
+DimPlot(raw_object, label = TRUE)
+
+```
+## Expression validation via 
+# Vln plots 0
+```{r}
+VlnPlot(raw_object, features = c("OGN", "NAALADL2-AS2"), group.by = "cell_type")
+```
+# Dot plot 0
+```{r}
+DotPlot(raw_object, features = c("OGN", "NAALADL2-AS2")) + RotatedAxis()
+```
+# Dot plot general vs cell types
+```{r}
+DotPlot(object = raw_object, features = top_genes) +
+  scale_color_gradientn(colors = c("blue", "white", "red")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+# Heatmap gnl
+```{r}
+DoHeatmap(object = raw_object, features = top_genes) +
+  scale_fill_gradientn(colors = c("blue", "white", "red"))
+```
+# Get differentially expressed markers per cell type
+```{r}
+cluster_markers <- FindMarkers(raw_object, ident.1 = "Luminal", ident.2 = "Tcells", ident.3 = "Endothelial cells", ident.4 = "macrophages", ident.5 = "Fibroblasts cells", ident.6 = "Luminal/Basal", ident.5 = "Bcells", ident.6 = "Basal/Fibroblasts")
+```
+# Load ClusterProfiler library
+```{r}
+library(clusterProfiler)
+```
+# Load org.Hs.eg.db 
+```{r}
+library(org.Hs.eg.db)
+```
+#check if cluster_markers is in dataframe
+```{r}
+class(Extract_Top_Markers)
+```
+# Check the first few genes in cluster_markers
+```{r}
+head(cluster_markers$gene)
+```
+# Check if these genes exist in the raw_object
+```{r}
+head(rownames(raw_object))
+```
+# Inspect column names
+```{r}
+colnames(cluster_markers)
+```
+# View the first few rows of cluster_markers
+```{r}
+head(cluster_markers)
+```
+# Convert row names to a column named 'gene'
+```{r}
+cluster_markers$gene <- rownames(cluster_markers)
+```
+# Confirm the change
+```{r}
+head(cluster_markers$gene)
+```
+# Check how many genes in cluster_markers$gene match raw_object
+```{r}
+sum(cluster_markers$gene %in% rownames(raw_object))
+```
+# View unmatched genes
+```{r}
+unmatched_genes <- cluster_markers$gene[!cluster_markers$gene %in% rownames(raw_object)]
+head(unmatched_genes)
+```
+# Check the identities
+```{r}
+head(Idents(raw_object))
+table(Idents(raw_object))
+```
+# Assuming you have a metadata column named 'cell_type'
+```{r}
+Idents(raw_object) <- raw_object@meta.data$cell_type
+```
+# Verify the new identities
+```{r}
+table(Idents(raw_object))
+```
+
+# Add cell_type column using a mapping approach
+```{r}
+cluster_markers$cell_type <- Idents(raw_object)[cluster_markers$gene]
+```
+# View a sample of the data
+```{r}
+head(cluster_markers)
+```
+# Match genes in cluster_markers with raw_object rownames
+```{r}
+cluster_markers$cell_type <- raw_object@meta.data$cell_type[match(cluster_markers$gene, rownames(raw_object))]
+```
+
+# Filter markers by statiscal significance
+```{r}
+significant_markers <- cluster_markers %>%
+  filter(p_val_adj < 0.05)
+```
+# Use fold change to select markers with biologically meaningful expression
+```{r}
+selected_markers <- significant_markers %>% 
+  filter(avg_log2FC > 0.5)
+```
+# Select top_2_ markers
+```{r}
+top_markers <- selected_markers %>%
+  group_by(cell_type) %>%
+  top_n(2, avg_log2FC)
+```
+## Step to prepare and analyse the dge
+#Subset the data
+```{r}
+top_genes <- top_markers$gene
+```
+# Subset the expression matrix to include only the top-genes
+```{r}
+expression_data <- subset(raw_object, features = top_genes)
+
+```
+# perform differential gene expression analysis
+```{r}
+dge_results <- list()
+
+for (cell in unique(top_markers$cell_type)) {
+  dge_results[[cell]] <- FindMarkers(
+    object = raw_object,
+    ident.1 = cell,
+    group.by = "cell_type", 
+    features = top_genes,    
+    logfc.threshold = 0,  
+    min.pct = 0            
+  )
+}
+```
+# Combine all DGE results into a single data frame
+```{r}
+dge_results_combined <- do.call(rbind, lapply(names(dge_results), function(cell) {
+  dge <- dge_results[[cell]]
+  dge$cell_type <- cell  # Add cell_type info
+  return(dge)
+}))
+```
+# dot plot to show the expression of top_genes per cell types
+```{r}
+DotPlot(raw_object, features = top_genes, group.by = "cell_type") +
+  scale_color_gradient(low = "blue", high = "red") +
+  labs(title = "Dot Plot of Top Markers", x = "Genes", y = "Cell Types") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+## Bar plot to summirize the number of significan gene for each cell type
+# load library dplyr
+```{r}
+library(dplyr)
+```
+# Count significant genes per cell type
+```{r}
+sig_genes_count <- dge_results_combined %>%
+  filter(p_val < 0.5) %>%
+  group_by(cell_type) %>%
+  summarize(count = n())
+```
+# Plot bar chart
+```{r}
+ggplot(sig_genes_count, aes(x = cell_type, y = count, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Number of Significant Genes per Cell Type", x = "Cell Type", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+#Plot ridge plot  to display the distribution of expression values for a specific gene across cell types.
+```{r}
+RidgePlot(raw_object, features = c("SERPINB11", "OGN"), group.by = "cell_type") +
+  labs(title = "Expression Distribution")
+```
+# DGE with gene symbols
+```{r}
+dge_genes <- c("SERPINB11", "OGN","NAALADL2-AS2", "BTC","B4GALNT4","DTNA","MS4A2","ERICH5","RP11-152D8.1", "NR6A1","RP1188H9.2", "LINC00578", "IL1RAPL1", "MOV10L1","RP11-794G24","SCGN","BEST3", "GVQW2","SLITRK4", "ADCYAP1")
+```
+# load libraries
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+# Convert gene symbols to Entrez IDs if needed
+```{r}
+gene_entrez <- bitr(dge_genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+```
+# Perform GO enrichment analysis
+```{r}
+go_results <- enrichGO(
+  gene         = gene_entrez$ENTREZID,
+  OrgDb        = org.Hs.eg.db,
+  keyType      = "ENTREZID",
+  ont          = "BP",  
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.1
+)
+```
+# View results
+```{r}
+head(go_results)
+```
+
+
+# Plot the top GO terms
+```{r}
+barplot(go_results, showCategory = 10)
+```
+# Load libraries
+```{r}
+library(enrichplot)   
+library(ggplot2)
+```
+# Perform KEGG enrichment analysis
+```{r}
+kegg_results <- enrichKEGG(
+  gene         = gene_entrez$ENTREZID,  
+  organism     = "hsa",  
+  keyType      = "kegg",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.1
+)
+```
+# xkeck gene entez
+```{r}
+head(gene_entrez)
+```
+
+# View the results
+```{r}
+head(kegg_results)
+```
+#Load library
+```{r}
+library(clusterProfiler)
+```
+# Check if ENTREZ IDs are mappable in KEGG
+```{r}
+mapped_ids <- bitr_kegg(gene_entrez$ENTREZID, fromType="ncbi-geneid", toType="kegg", organism="hsa")
+```
+# View the mapped KEGG IDs
+```{r}
+head(mapped_ids)
+```
+# Run KEGG enrichment pathway
+```{r}
+kegg_results <- enrichKEGG(
+  gene         = gene_entrez$ENTREZID,  
+  organism     = "hsa",  
+  keyType      = "kegg",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.1  
+)
+```
+# Check results
+```{r}
+head(kegg_results)
+```
+# Install package ReactomePA
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("ReactomePA")
+```
+
+# LOad library
+```{r}
+library(ReactomePA)
+```
+# ReactomePA enrichment pathway
+```{r}
+reactome_results <- enrichPathway(
+  gene         = gene_entrez$ENTREZID,
+  organism     = "human",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.1  # Use relaxed threshold
+)
+```
+# Check if results exist
+```{r}
+head(reactome_results)
+```
+# Plot reactomePA results
+```{r}
+if (!is.null(reactome_results) && nrow(as.data.frame(reactome_results)) > 0) {
+  dotplot(reactome_results, showCategory=10) + ggtitle("Reactome Pathway Enrichment")
+} 
+```
+# # perform an d visualise psedotime trajectory analysis on progenitor cells
+# Install monocle3 package
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("monocle3")
+```
+# Install dependencies
+```{r}
+install.packages("devtools")
+devtools::install_github("cole-trapnell-lab/monocle3")
+```
+
+# Load the libraries
+```{r}
+library(monocle3)
+```
+# Load library ggplot
+```{r}
+library(ggplot2)
+```
+# Install cell wrappers
+```{r}
+devtools::install_github('satijalab/seurat-wrappers')
+```
+# Load library cell wrappers
+```{r}
+library(SeuratWrappers)
+```
+# Convert Seurat object to Monocle3 cell_data_set (CDS)
+```{r}
+cds <- as.cell_data_set(raw_object)
+```
+# Inspect cds
+```{r}
+cds
+```
+# Normalize and process data in monocle3
+```{r}
+cds <- preprocess_cds(cds, num_dim = 50)  
+cds <- reduce_dimension(cds)  
+```
+# Clusters cells in monocle3
+```{r}
+cds <- cluster_cells(cds)
+```
+# Construct the trajectory graph
+```{r}
+cds <- learn_graph(cds)
+```
+# View cluster assignment
+```{r}
+# View cluster assignments
+table(partitions(cds))
+```
+# Select cluster from Umap plot
+```{r}
+plot_cells(cds, color_cells_by = "cluster", show_trajectory_graph = TRUE)
+```
+# Interactively select the root
+```{r}
+cds <- order_cells(cds)
+```
+# Visualize the pseudotime trajectory
+```{r}
+plot_cells(cds, color_cells_by = "pseudotime", show_trajectory_graph = TRUE)
+```
+# By cell type
+```{r}
+plot_cells(cds, color_cells_by = "cell_type", show_trajectory_graph = TRUE)
+```
+# Run Moran's I test to find genes that change along pseudotime
+```{r}
+trajectory_genes <- graph_test(cds, neighbor_graph="principal_graph", cores=4)
+```
+# Load library dplyr
+```{r}
+library(dplyr)
+```
+
+# View top genes with significant changes
+```{r}
+trajectory_genes %>% arrange(q_value) %>% head(20)
+```
+# check the colnames
+```{r}
+colnames(trajectory_genes)
+```
+# Drop the existing column
+```{r}
+trajectory_genes <- trajectory_genes %>%
+  select(-gene_short_name)
+```
+# Check colonames
+```{r}
+colnames(trajectory_genes)
+```
+# Verify structure of dataframe
+```{r}
+str(trajectory_genes)
+```
+# checking few rows
+```{r}
+head(trajectory_genes)
+```
+# Check if genes are in rows 
+```{r}
+rownames(trajectory_genes)
+```
+# Remove any duplicate
+```{r}
+trajectory_genes <- trajectory_genes %>%
+  select(-gene_short_name) %>%
+  tibble::rownames_to_column(var = "gene_short_name")
+```
+# Check if gene_shot_name exist in cds
+```{r}
+colnames(rowData(cds))
+```
+# ensure gene-short-name matches cds
+```{r}
+intersect(top_genes, rownames(cds))
+```
+# confirm that top-genes selection is valid
+```{r}
+all(top_genes %in% rownames(cds))
+```
+# Confirm if gene-short-name exist in rawdata(cds)
+```{r}
+colnames(rowData(cds))
+```
+# force put the rawdata(cds)as dataframe
+```{r}
+rowData(cds) <- as.data.frame(rowData(cds))
+```
+# ensure gene-short-name is unique
+```{r}
+rowData(cds)$gene_short_name <- make.unique(rownames(cds))
+```
+# Assign gene-short-name manually
+```{r}
+rowData(cds)$gene_short_name <- rownames(cds)
+```
+# Rename first column
+```{r}
+colnames(trajectory_genes)[1] <- "gene_short_name"
+```
+# Extract top 20 trajectory-dependent genes
+```{r}
+top_genes <- trajectory_genes %>% 
+  arrange(q_value) %>% 
+  head(20) %>% 
+  pull(gene_short_name)
+```
+# Check if it worked
+```{r}
+print(top_genes)
+```
+
+# Plot gene expression along pseudotime
+```{r}
+plot_genes_in_pseudotime(cds[top_genes,], color_cells_by="pseudotime")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
