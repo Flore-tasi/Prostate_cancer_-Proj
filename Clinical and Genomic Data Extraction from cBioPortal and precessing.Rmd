@@ -1,0 +1,218 @@
+---
+title: "Case study 1"
+author: "G.E.Flore"
+date: "2025-03-22"
+output: html_document
+---
+
+# Case Study 1: Clinical and Genomic Data Extraction from cBioPortal
+
+# Install cbioportal  Packages from bioconductor ( when CRAN fails)
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("cbioportalR")
+```
+# load the required packages
+```{r}
+library(cbioportalR)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+## Set up connection to cBioPortal using the API
+```{r}
+set_cbioportal_db("public")
+```
+# Test the connection
+```{r}
+test_cbioportal_db()
+```
+# List available studies
+```{r}
+available_studies()
+```
+#check if the BRCA-TCGA study is available
+```{r}
+studies <- available_studies()
+brca_study <- studies[grepl("BRCA|breast", studies$studyId, ignore.case = TRUE), ]
+print(brca_study)
+```
+## Investigate suitability of brca_tcga-gdc for all our case studies
+## Example: TCGA Breast Cancer Study
+```{r}
+study_id <- "brca_tcga_gdc"
+```
+
+# get study metadata
+```{r}
+get_study_info("brca_tcga_gdc")
+```
+# Extract Clinical Data
+```{r}
+clinical_data <- get_clinical_by_study("brca_tcga_gdc")
+head(clinical_data)
+dim(clinical_data)
+```
+# Extract Mutation Data
+```{r}
+mutations <- get_mutations_by_study("brca_tcga_gdc")
+dim(mutations)
+head(mutations)
+```
+#Extract Copy Number Alteration (CNA) Data
+```{r}
+cna_data <- get_cna_by_study("brca_tcga_gdc")
+head(cna_data)
+dim(cna_data)
+```
+## Data cleaning and preprocessing
+# Remove unneccessary columns from clinical data
+```{r}
+clinical_clean <- clinical_data %>%
+  select(-c(patientId, sampleId)) %>%
+  distinct()
+```
+# Remove Duplicates from Mutation Data
+```{r}
+mutation_clean <- mutations %>%
+  distinct()
+```
+# Remove Duplicates from CNV Data
+```{r}
+cna_clean <- cna_data %>%
+  distinct()
+```
+##Save Processed Data for Further Analysis
+```{r}
+write.csv(clinical_clean, "clinical_data_clean.csv", row.names = FALSE)
+write.csv(mutations, "mutation_data_clean.csv", row.names = FALSE)
+write.csv(cna_clean, "cna_data_clean.csv", row.names = FALSE)
+```
+#Summary and Visualization
+```{r}
+summary(clinical_clean)
+```
+# check columns in clinical data
+```{r}
+colnames(clinical_clean)
+```
+#Check for Available Attributes
+```{r}
+unique(clinical_clean$clinicalAttributeId)
+```
+# Filter age data
+```{r}
+age_data <- clinical_clean %>%
+  filter(clinicalAttributeId == "AGE") %>%
+  mutate(age = as.numeric(value)) %>%
+  filter(!is.na(age)) # Remove any NA values if present
+```
+# View the first few rows to confirm
+```{r}
+head(age_data)
+```
+
+# Visualize Age Distribution
+```{r}
+ggplot(age_data, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "blue", color = "white") +
+  theme_minimal() +
+  labs(title = "Age Distribution of Breast Cancer Patients", 
+       x = "Age at Diagnosis", 
+       y = "Count")
+```
+# Filter for ethnicity data
+```{r}
+ethnicity_data <- clinical_clean %>%
+  filter(clinicalAttributeId == "ETHNICITY")
+```
+
+# Visualize sex
+```{r}
+ggplot(ethnicity_data, aes(x = value, fill = value)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(title = "Ethnicity Distribution", x = "Ethnicity", y = "Count")
+```
+#check cna data
+```{r}
+colnames(cna_clean)
+```
+
+# Visualize cna distribution
+```{r}
+ggplot(cna_clean, aes(x = alteration)) +
+  geom_histogram(binwidth = 0.2, fill = "purple", color = "white") +
+  theme_minimal() +
+  labs(title = "Copy Number Variation Distribution", 
+       x = "Copy Number Alteration", 
+       y = "Count")
+```
+# Check mutation data
+```{r}
+colnames(mutation_clean)
+```
+
+## Check for common mutations
+```{r}
+top_mutations <- mutation_clean %>%
+  count(hugoGeneSymbol, sort = TRUE) %>%
+  head(10)
+```
+# Plot the top mutations
+```{r}
+ggplot(top_mutations, aes(x = reorder(hugoGeneSymbol, n), y = n)) +
+  geom_col(fill = "red") +
+  coord_flip() +
+  labs(title = "Top 10 Mutated Genes", x = "Gene", y = "Mutation Count")
+```
+# Access mutation types
+```{r}
+ggplot(mutation_clean, aes(x = mutationType, fill = mutationType)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(title = "Mutation Types", x = "Mutation Type", y = "Count")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
