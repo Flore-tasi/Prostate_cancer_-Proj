@@ -1,0 +1,330 @@
+---
+title: 'Case study 2: Exploratory Data Analysis'
+author: "G.E.Flore"
+date: "2025-03-23"
+output: html_document
+---
+# Install survminer package
+```{r}
+install.packages("survminer", dependencies = TRUE)
+```
+
+# Load the neccessary library
+```{r}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(dplyr)
+library(tidyr)
+```
+#1. Load Preprocessed Data
+```{r}
+clinical_data <- read.csv("clinical_data_clean.csv")
+mutation_data <- read.csv("mutation_data_clean.csv")
+cna_data <- read.csv("cna_data_clean.csv")
+```
+#2. Survival Analysis
+```{r}
+surv_data <- clinical_data %>%
+  filter(clinicalAttributeId %in% c("OS_MONTHS", "OS_STATUS")) %>%
+  pivot_wider(names_from = clinicalAttributeId, values_from = value) %>%
+  mutate(OS_MONTHS = as.numeric(OS_MONTHS),
+         OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0))
+
+surv_obj <- Surv(surv_data$OS_MONTHS, surv_data$OS_STATUS)
+fit <- survfit(surv_obj ~ 1)
+ggsurvplot(fit, data = surv_data, risk.table = TRUE, palette = "Dark2")
+```
+# 3. Survival Analysis with specifications
+## Preprocessing survival data
+```{r}
+surv_data <- clinical_data %>% 
+  filter(clinicalAttributeId %in% c("OS_MONTHS", "OS_STATUS")) %>%
+  pivot_wider(names_from = clinicalAttributeId, values_from = value) %>%
+  mutate(
+    OS_MONTHS = as.numeric(OS_MONTHS),
+    OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0)
+  ) %>%
+  filter(!is.na(OS_MONTHS) & OS_MONTHS > 0)  # Remove NAs and non-positive survival times
+```
+# Create survival object
+```{r}
+surv_obj <- Surv(surv_data$OS_MONTHS, surv_data$OS_STATUS)
+```
+# Fit Kaplan-Meier curve
+```{r}
+fit <- survfit(surv_obj ~ 1)
+```
+# Plot with cleaner style
+```{r}
+ggsurvplot(
+  fit,
+  data = surv_data,
+  risk.table = TRUE,
+  conf.int = TRUE,
+  xlim = c(0, 120),
+  ylim = c(0.90, 1.00),  # zoom in on top 10% of survival
+  break.time.by = 20,
+  surv.median.line = "hv",
+  ggtheme = theme_minimal(),
+  palette = "Dark2",
+  risk.table.y.text.col = TRUE,
+  risk.table.height = 0.25
+)
+```
+## Stratifying survival curve by PATH_STAGE
+# Step 1: Pivot all clinical attributes
+```{r}
+library(dplyr)
+library(tidyr)
+
+surv_data <- clinical_data %>%
+  pivot_wider(
+    names_from = clinicalAttributeId,
+    values_from = value,
+    values_fn = ~ dplyr::first(.x)  # or max(.x), depending on your need
+  ) %>%
+  mutate(
+    OS_MONTHS = as.numeric(OS_MONTHS),
+    OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0)
+  )
+```
+# # Step 2: Filter to those with valid PATH_STAGE
+```{r}
+surv_data_filtered <- surv_data %>%
+  filter(!is.na(PATH_STAGE) & PATH_STAGE != "")
+```
+# Step 3: Create survival object
+```{r}
+surv_obj <- Surv(surv_data_filtered$OS_MONTHS, surv_data_filtered$OS_STATUS)
+```
+# Step 4: Stratify by PATH_STAGE
+```{r}
+fit <- survfit(surv_obj ~ PATH_STAGE, data = surv_data_filtered)
+```
+# Genrate custum color
+```{r}
+n_groups <- length(unique(surv_data_filtered$PATH_STAGE))
+custom_palette <- scales::hue_pal()(n_groups)
+```
+
+# Step 5: Plot
+```{r}
+ggsurvplot(
+  fit,
+  data = surv_data_filtered,
+  risk.table = TRUE,
+  conf.int = FALSE,
+  xlim = c(0, 120),
+  break.time.by = 20,
+  pval = TRUE,
+  surv.median.line = "hv",
+  palette = custom_palette,
+  ggtheme = theme_minimal()
+)
+```
+## Reduce the Number of Groups to just four stages for clarity
+```{r}
+surv_data_filtered <- surv_data_filtered %>%
+  mutate(PATH_STAGE_GROUPED = case_when(
+    grepl("I", PATH_STAGE) & !grepl("II|III|IV", PATH_STAGE) ~ "Stage I",
+    grepl("II", PATH_STAGE) ~ "Stage II",
+    grepl("III", PATH_STAGE) ~ "Stage III",
+    grepl("IV", PATH_STAGE) ~ "Stage IV",
+    TRUE ~ "Other"
+  )) %>%
+  filter(PATH_STAGE_GROUPED != "Other")
+```
+#Recreate survival object *after* filtering/mutating
+```{r}
+surv_obj <- Surv(as.numeric(surv_data_filtered$OS_MONTHS), surv_data_filtered$OS_STATUS)
+```
+
+# Fit Kaplan-Meier curve
+```{r}
+fit <- survfit(surv_obj ~ PATH_STAGE_GROUPED, data = surv_data_filtered)
+```
+# Plot
+```{r}
+ggsurvplot(
+  fit,
+  data = surv_data_filtered,
+  risk.table = TRUE,
+  conf.int = FALSE,
+  xlim = c(0, 120),
+  break.time.by = 20,
+  pval = TRUE,
+  surv.median.line = "hv",
+  palette = "Set2",
+  ggtheme = theme_minimal()
+)
+```
+## Let's stratify by age
+## Add AGE_GROUP column to surv_data
+```{r}
+surv_data_age <- surv_data %>%
+  filter(!is.na(AGE) & AGE != "") %>%
+  mutate(
+    AGE = as.numeric(AGE),
+    AGE_GROUP = case_when(
+      AGE < 50 ~ "<50",
+      AGE >= 50 & AGE <= 65 ~ "50-65",
+      AGE > 65 ~ ">65"
+    )
+  )
+```
+# Filter for non-missing OS data
+```{r}
+surv_data_age <- surv_data_age %>%
+  filter(!is.na(OS_MONTHS), !is.na(OS_STATUS))
+```
+# Survival object
+```{r}
+surv_obj <- Surv(surv_data_age$OS_MONTHS, surv_data_age$OS_STATUS)
+```
+# Fit survival model stratified by AGE_GROUP
+```{r}
+fit <- survfit(surv_obj ~ AGE_GROUP, data = surv_data_age)
+```
+# Plot
+```{r}
+ggsurvplot(
+  fit,
+  data = surv_data_age,
+  risk.table = TRUE,
+  conf.int = FALSE,
+  xlim = c(0, 120),
+  break.time.by = 20,
+  pval = TRUE,
+  surv.median.line = "hv",
+  palette = "Set1",
+  ggtheme = theme_minimal()
+)
+```
+#Step 2 CNA Gene Burden Analysis
+```{r}
+cna_freq <- cna_data %>%
+  group_by(hugoGeneSymbol) %>%
+  summarise(AlterationRate = mean(abs(as.numeric(alteration)) > 1, na.rm = TRUE)) %>%
+  arrange(desc(AlterationRate))
+
+head(cna_freq, 10)
+```
+#Bar Plot of Top 10 CNA-Altered Genes
+# Plot top 10 genes with the highest CNA alteration rate
+```{r}
+top_cna_genes <- cna_freq %>% head(10)
+
+ggplot(top_cna_genes, aes(x = reorder(hugoGeneSymbol, AlterationRate), y = AlterationRate)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 CNA-Altered Genes",
+       x = "Gene",
+       y = "Alteration Frequency")
+```
+# filter genes with broader sample representation
+```{r}
+cna_freq_filtered <- cna_data %>%
+  group_by(hugoGeneSymbol) %>%
+  summarise(SampleCount = n(),
+            AlterationRate = mean(abs(as.numeric(alteration)) > 1, na.rm = TRUE)) %>%
+  filter(SampleCount > 10) %>%
+  arrange(desc(AlterationRate))
+```
+# Select top 10 most frequently altered genes
+```{r}
+top_cna_genes <- cna_freq_filtered %>% head(10)
+```
+# Plot
+```{r}
+ggplot(top_cna_genes, aes(x = reorder(hugoGeneSymbol, AlterationRate), y = AlterationRate)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 CNA-Altered Genes (with >10 samples)",
+       x = "Gene",
+       y = "Alteration Frequency")
+```
+# Top mutated genes
+```{r}
+top_mut <- mutation_data %>%
+  count(hugoGeneSymbol, sort = TRUE) %>%
+  head(10)
+
+ggplot(top_mut, aes(x = reorder(hugoGeneSymbol, n), y = n)) +
+  geom_col(fill = "firebrick") +
+  coord_flip() +
+  labs(title = "Top 10 Mutated Genes", x = "Gene", y = "Count")
+```
+# mutation type distribution
+```{r}
+ggplot(mutation_data, aes(x = mutationType, fill = mutationType)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(title = "Distribution of Mutation Types", x = "Mutation Type", y = "Count")
+```
+#Mutation Burden vs CNA Burden
+```{r}
+mut_count <- mutation_data %>%
+  group_by(sampleId) %>%
+  summarise(MutationCount = n())
+
+cna_burden <- cna_data %>%
+  group_by(sampleId) %>%
+  summarise(CNABurden = mean(abs(as.numeric(alteration)), na.rm = TRUE))
+
+joined <- inner_join(mut_count, cna_burden, by = "sampleId")
+
+ggplot(joined, aes(x = MutationCount, y = CNABurden)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm") +
+  labs(title = "Mutation Burden vs CNA Burden")
+```
+# Example using mutation counts per gene per sampleto get PCA on muatation
+```{r}
+mut_mat <- mutation_data %>%
+  count(sampleId, hugoGeneSymbol) %>%
+  pivot_wider(names_from = hugoGeneSymbol, values_from = n, values_fill = 0)
+
+pca_result <- prcomp(mut_mat[,-1], scale. = TRUE)
+
+plot(pca_result$x[, 1:2], col = "blue", pch = 16,
+     main = "PCA of Mutation Profiles", xlab = "PC1", ylab = "PC2")
+```
+
+
+
+
+
+
+
+
+
+
+## Make sure PATH_STAGE exists and is not NA
+```{r}
+surv_data_filtered <- surv_data %>%
+  filter(!is.na(PATH_STAGE) & PATH_STAGE != "")
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
