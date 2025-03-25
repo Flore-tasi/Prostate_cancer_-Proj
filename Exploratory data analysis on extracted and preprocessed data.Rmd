@@ -292,21 +292,167 @@ pca_result <- prcomp(mut_mat[,-1], scale. = TRUE)
 plot(pca_result$x[, 1:2], col = "blue", pch = 16,
      main = "PCA of Mutation Profiles", xlab = "PC1", ylab = "PC2")
 ```
-
-
-
-
-
-
-
-
-
-
-## Make sure PATH_STAGE exists and is not NA
+# View the first few rows of clinical data
 ```{r}
-surv_data_filtered <- surv_data %>%
-  filter(!is.na(PATH_STAGE) & PATH_STAGE != "")
+head(clinical_data)
 ```
+# Check the available columnnames
+```{r}
+colnames(mutation_data)
+```
+# Select the Relevant clinical colunms for racial disparities
+```{r}
+selected_demographics <- c(
+  "SEX",               # Biological sex
+  "AGE",               # Age at diagnosis
+  "RACE",              # Self-identified race
+  "ETHNICITY"          # Hispanic or non-Hispanic
+)
+```
+# For survival analysis and treatment response
+```{r}
+selected_survival <- c(
+  "OS_STATUS",         # Overall survival status: LIVING / DECEASED
+  "OS_MONTHS",         # Overall survival duration in months
+  "DFS_STATUS",        # Disease-free survival status
+  "DFS_MONTHS"         # Disease-free survival duration
+)
+```
+# For clinical outcome and tratment
+```{r}
+selected_clinical <- c(
+  "PRIMARY_SITE_PATIENT",   # e.g., Breast
+  "PRIMARY_DIAGNOSIS",      # e.g., Invasive carcinoma
+  "YEAR_OF_DIAGNOSIS",      # Diagnosis year
+  "VITAL_STATUS",           # Current vital status
+  "PATH_STAGE",             # Full pathologic stage (e.g., Stage II)
+  "PATH_T_STAGE",           # Tumor size category
+  "PATH_N_STAGE",           # Lymph node involvement
+  "PATH_M_STAGE",           # Distant metastasis
+  "PRIOR_TREATMENT",        # Prior treatment (Yes/No)
+  "PRIOR_MALIGNANCY"        # History of other malignancies
+)
+```
+# Combine column list
+```{r}
+selected_columns <- c(selected_demographics, selected_survival, selected_clinical)
+```
+# Check clinical data
+```{r}
+head(clinical_data)
+```
+# Reshape to Wide Format
+# Load libraries
+```{r}
+library(tidyr)
+library(dplyr)
+```
+# Replace with actual patient/sample ID column if it's different
+```{r}
+clinical_wide <- clinical_data %>%
+  filter(clinicalAttributeId %in% selected_columns) %>%
+  select(uniquePatientKey, clinicalAttributeId, value) %>%
+  pivot_wider(names_from = clinicalAttributeId, values_from = value)
+```
+# View structure and missing values
+```{r}
+str(clinical_wide)
+summary(clinical_wide)
+colSums(is.na(clinical_wide))
+```
+# Prepare for Survival Analysis
+# Clean survival variables
+```{r}
+clinical_wide <- clinical_wide %>%
+  mutate(
+    OS_MONTHS = as.numeric(OS_MONTHS),
+    OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0)
+  )
+```
+#perform Kaplan-Meier survival analysis
+```{r}
+library(survival)
+library(survminer)
+
+surv_obj <- Surv(time = clinical_wide$OS_MONTHS, event = clinical_wide$OS_STATUS)
+fit <- survfit(surv_obj ~ 1)
+ggsurvplot(fit, data = clinical_wide, risk.table = TRUE)
+```
+#Visualize Racial Disparities
+```{r}
+ggplot(clinical_wide, aes(x = RACE, fill = RACE)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(title = "Race Distribution of Patients", x = "Race", y = "Count")
+```
+#Explore Clinical Outcomes by Stage or Race
+```{r}
+ggplot(clinical_wide, aes(x = PATH_STAGE, fill = OS_STATUS)) +
+  geom_bar(position = "fill") +
+  theme_minimal() +
+  labs(title = "Survival by Pathologic Stage", y = "Proportion")
+```
+# 1. Filter mutation data for TP53
+```{r}
+tp53_mut <- mutation_data %>%
+  filter(hugoGeneSymbol == "TP53") %>%
+  select(uniquePatientKey) %>%
+  distinct() %>%
+  mutate(TP53_mutated = 1)
+```
+# 2. Merge with clinical data (wide format)
+```{r}
+clinical_tp53 <- clinical_wide %>%
+  left_join(tp53_mut, by = "uniquePatientKey") %>%
+  mutate(TP53_mutated = ifelse(is.na(TP53_mutated), 0, 1))  # Mark unmutated patients as 0
+```
+# 3. Summarize TP53 mutation frequency by race
+```{r}
+table_tp53_race <- clinical_tp53 %>%
+  group_by(RACE, TP53_mutated) %>%
+  summarise(Count = n()) %>%
+  ungroup()
+```
+# 4. Visualize
+```{r}
+library(ggplot2)
+
+ggplot(table_tp53_race, aes(x = RACE, y = Count, fill = as.factor(TP53_mutated))) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = c("0" = "gray", "1" = "red"),
+                    name = "TP53 Mutated",
+                    labels = c("No", "Yes")) +
+  theme_minimal() +
+  labs(title = "TP53 Mutation Frequency by Race",
+       x = "Race",
+       y = "Proportion")
+```
+
+
+
+
+
+
+# Convert to a data frame for easy analysis
+```{r}
+mutation_df <- as.data.frame(mutation_data)
+```
+# View first few rows
+```{r}
+head(mutation_df)
+```
+# Select relevant columns
+```{r}
+selected_columns <- c(selected_demographics, selected_clinical, selected_survival)
+clinical_filtered <- clinical_data[, selected_columns]
+```
+
+
+
+
+
+
+
 
 
 ## R Markdown
