@@ -1,0 +1,112 @@
+---
+title: "R starter script"
+author: "G.E.Flore"
+date: "2025-03-31"
+output: html_document
+---
+
+# 1.	Use R as a calculator
+# add
+```{r}
+3 + 5
+```
+# divide
+```{r}
+12 / 4
+```
+# raised to the power
+```{r}
+2^3
+```
+# Multiply
+```{r}
+2 * 3
+```
+
+# Square root
+```{r}
+sqrt(16)
+```
+#2. assign variables
+#10 to X
+```{r}
+x <- 10
+```
+# 5 to Y
+```{r}
+y <- 5
+```
+# Add the two
+```{r}
+result <- x * y
+result
+```
+# 3.	Create vectors and explore them
+# Vector with gene names
+```{r}
+gene_names <- c("BRCA1", "TP53", "HER2", "EGFR")
+```
+# Expression for each gene
+```{r}
+expression <- c(2.5, 1.8, 3.1, 2.0)
+```
+# Check length
+```{r}
+length(expression)
+```
+# Mean
+```{r}
+mean(expression)
+```
+#4.	Use data.frame() to make a mini gene expression table
+```{r}
+df <- data.frame(Gene=gene_names, Expression=expression)
+head(df)
+```
+#Exercise Set 2: First Bioconductor Setup
+#1.	Install Bioconductor package manager
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install()  
+```
+# 2.	Install and load a basic Bioconductor package
+```{r}
+BiocManager::install("Biobase")
+library(Biobase)
+```
+#3.	Explore example ExpressionSet object
+```{r}
+data(sample.ExpressionSet)
+sample.ExpressionSet
+```
+# View expression values
+```{r}
+exprs(sample.ExpressionSet)[1:5, 1:5]
+```
+#Exercise Set 3: Plotting Basics
+#1.	Barplot gene expressions
+```{r}
+barplot(expression, names.arg = gene_names,
+        main = "Gene Expression",
+        ylab = "Expression Level",
+        col = "skyblue")
+```
+#2.	Simple ggplot2 practice
+#Install and Load ggplot library
+```{r}
+install.packages("ggplot2")
+library(ggplot2)
+```
+
+```{r}
+ggplot(df, aes(x = Gene, y = Expression)) +
+    geom_col(fill = "tomato") +
+    theme_minimal()
+```
+
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
