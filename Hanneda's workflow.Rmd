@@ -1,0 +1,140 @@
+---
+title: "Hanneda's work"
+author: "G.E.Flore"
+date: "2025-04-10"
+output: html_document
+---
+
+# install matrix
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("Matrix")
+```
+
+# Load essential packages
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+```
+# Read the CSV: make sure gene names are rownames
+```{r}
+raw <- read.csv("SCRHBF041.csv", row.names = 1)
+```
+# Confirm gene names are in rownames
+```{r}
+head(rownames(raw))    # Should look like: "GCLC", "CYP51A1", etc.
+head(colnames(raw))    # Should look like: barcodes or random IDs
+```
+# Make sure it's a matrix
+```{r}
+raw <- as.matrix(raw)
+```
+# Check that rownames are present and look like barcodes
+```{r}
+head(rownames(raw))
+```
+# Check colnames
+```{r}
+head(colnames(raw)) 
+```
+# Transpose the data
+```{r}
+raw <- t(raw)
+```
+# Convert to matrix
+```{r}
+raw <- as.matrix(raw)
+```
+# Now these should be true:
+```{r}
+head(rownames(raw))   # Expect: barcodes (cells)
+head(colnames(raw))   # Expect: gene names
+```
+# 3. Create Seurat object
+```{r}
+seurat_obj <- CreateSeuratObject(counts = raw, min.cells = 3, min.features = 200)
+```
+# 4. Add mitochondrial percentage (optional, if human genes and you use MT- prefix)
+```{r}
+seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+```
+# 5. Quality control plots
+```{r}
+VlnPlot(seurat_obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+# Skip percent.mt filtering since values are all 0
+
+# Filter based on nFeature_RNA and nCount_RNA
+```{r}
+seurat_obj <- subset(seurat_obj, 
+                     subset = nFeature_RNA > 200 & 
+                              nFeature_RNA < 2500 & 
+                              nCount_RNA < 50000)
+```
+# Violin plots for QC metrics after filtering
+```{r}
+VlnPlot(seurat_obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+# Normalize
+```{r}
+seurat_obj <- NormalizeData(seurat_obj)
+```
+# Find variable features
+```{r}
+seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = 2000)
+```
+# View  top 10 variable genes
+```{r}
+top10 <- head(VariableFeatures(seurat_obj), 10)
+print(top10)
+```
+# plot top 10 variable features with proper gene labels
+```{r}
+plot1 <- VariableFeaturePlot(seurat_obj)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2
+```
+
+
+# Verify gene names
+```{r}
+head(colnames(seurat_obj))
+```
+# Check the raw matrix
+```{r}
+raw_df <- read.csv("SCRHBF041.csv", row.names = 1)
+print(head(colnames(raw_df), 20))  # Show first 20 column headers
+```
+
+
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
