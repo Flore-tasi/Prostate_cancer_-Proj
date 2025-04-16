@@ -23,14 +23,25 @@ clinical_data <- read.csv("clinical_data_clean.csv")
 mutation_data <- read.csv("mutation_data_clean.csv")
 cna_data <- read.csv("cna_data_clean.csv")
 ```
+# Crosscheck
+```{r}
+unique(surv_data$OS_STATUS)
+table(surv_data$OS_STATUS)
+```
+#Check the actual OS_STATUS values before recoding:
+```{r}
+table(clinical_data$value[clinical_data$clinicalAttributeId == "OS_STATUS"])
+```
+
 #2. Survival Analysis
 ```{r}
 surv_data <- clinical_data %>%
   filter(clinicalAttributeId %in% c("OS_MONTHS", "OS_STATUS")) %>%
   pivot_wider(names_from = clinicalAttributeId, values_from = value) %>%
-  mutate(OS_MONTHS = as.numeric(OS_MONTHS),
-         OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0))
-
+  mutate(
+    OS_MONTHS = as.numeric(OS_MONTHS),
+    OS_STATUS = ifelse(OS_STATUS == "1:DECEASED", 1, 0)
+  )
 surv_obj <- Surv(surv_data$OS_MONTHS, surv_data$OS_STATUS)
 fit <- survfit(surv_obj ~ 1)
 ggsurvplot(fit, data = surv_data, risk.table = TRUE, palette = "Dark2")
@@ -38,14 +49,14 @@ ggsurvplot(fit, data = surv_data, risk.table = TRUE, palette = "Dark2")
 # 3. Survival Analysis with specifications
 ## Preprocessing survival data
 ```{r}
-surv_data <- clinical_data %>% 
+surv_data <- clinical_data %>%
   filter(clinicalAttributeId %in% c("OS_MONTHS", "OS_STATUS")) %>%
   pivot_wider(names_from = clinicalAttributeId, values_from = value) %>%
   mutate(
     OS_MONTHS = as.numeric(OS_MONTHS),
-    OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0)
+    OS_STATUS = ifelse(OS_STATUS == "1:DECEASED", 1, 0)
   ) %>%
-  filter(!is.na(OS_MONTHS) & OS_MONTHS > 0)  # Remove NAs and non-positive survival times
+  filter(!is.na(OS_MONTHS) & OS_MONTHS > 0)
 ```
 # Create survival object
 ```{r}
@@ -86,7 +97,7 @@ surv_data <- clinical_data %>%
   ) %>%
   mutate(
     OS_MONTHS = as.numeric(OS_MONTHS),
-    OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0)
+    OS_STATUS = ifelse(OS_STATUS == "1:DECEASED", 1, 0)
   )
 ```
 # # Step 2: Filter to those with valid PATH_STAGE
@@ -115,7 +126,7 @@ ggsurvplot(
   data = surv_data_filtered,
   risk.table = TRUE,
   conf.int = FALSE,
-  xlim = c(0, 120),
+  xlim = c(0, 300),
   break.time.by = 20,
   pval = TRUE,
   surv.median.line = "hv",
@@ -123,6 +134,7 @@ ggsurvplot(
   ggtheme = theme_minimal()
 )
 ```
+
 ## Reduce the Number of Groups to just four stages for clarity
 ```{r}
 surv_data_filtered <- surv_data_filtered %>%
@@ -159,6 +171,30 @@ ggsurvplot(
   ggtheme = theme_minimal()
 )
 ```
+# Adjust plot for clarity
+```{r}
+ggsurvplot(
+  fit,
+  data = surv_data_filtered,
+  risk.table = TRUE,
+  conf.int = FALSE,
+  xlim = c(0, 300),
+  break.time.by = 20,
+  pval = TRUE,
+  surv.median.line = "hv",
+  palette = "Set2",
+  ggtheme = theme_minimal(),
+  
+  # 🛠️ Clarity improvements for risk table
+  risk.table.height = 0.3,               # More vertical space for risk table
+  risk.table.y.text.col = TRUE,          # Color text same as curve
+  risk.table.y.text = TRUE,              # Show group names
+  font.tickslab = 10,                    # Increase tick label font size
+  tables.theme = theme_minimal(),        # Match minimal theme
+  font.risk.table = c(10, "plain", "black") # Set font size, style, and color
+)
+```
+
 ## Let's stratify by age
 ## Add AGE_GROUP column to surv_data
 ```{r}
@@ -193,14 +229,22 @@ ggsurvplot(
   data = surv_data_age,
   risk.table = TRUE,
   conf.int = FALSE,
-  xlim = c(0, 120),
-  break.time.by = 20,
+  xlim = c(0, 300),
+  break.time.by = 20,                   # Adjust spacing for readability
   pval = TRUE,
   surv.median.line = "hv",
   palette = "Set1",
-  ggtheme = theme_minimal()
+  ggtheme = theme_minimal(),
+
+  # 🛠️ Clarity Enhancements
+  risk.table.height = 0.3,              # More vertical space for table
+  risk.table.y.text.col = TRUE,         # Color labels same as lines
+  risk.table.y.text = TRUE,             # Show group names
+  font.tickslab = 10,                   # Bigger axis font
+  font.risk.table = c(10, "plain", "black")
 )
 ```
+
 #Step 2 CNA Gene Burden Analysis
 ```{r}
 cna_freq <- cna_data %>%
@@ -223,6 +267,7 @@ ggplot(top_cna_genes, aes(x = reorder(hugoGeneSymbol, AlterationRate), y = Alter
        x = "Gene",
        y = "Alteration Frequency")
 ```
+
 # filter genes with broader sample representation
 ```{r}
 cna_freq_filtered <- cna_data %>%
@@ -246,6 +291,24 @@ ggplot(top_cna_genes, aes(x = reorder(hugoGeneSymbol, AlterationRate), y = Alter
        x = "Gene",
        y = "Alteration Frequency")
 ```
+# CNA burden per sample
+```{r}
+cna_burden <- cna_data %>%
+  group_by(sampleId) %>%
+  summarise(CNA_burden = sum(abs(as.numeric(alteration)) > 1, na.rm = TRUE))
+```
+# Visuslize the distribution
+```{r}
+ggplot(cna_burden, aes(x = CNA_burden)) +
+  geom_histogram(bins = 30, fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "CNA Burden per Sample",
+    x = "Number of Altered Genes (|CNA| > 1)",
+    y = "Number of Samples"
+  )
+```
+
 # Top mutated genes
 ```{r}
 top_mut <- mutation_data %>%
@@ -281,6 +344,33 @@ ggplot(joined, aes(x = MutationCount, y = CNABurden)) +
   geom_smooth(method = "lm") +
   labs(title = "Mutation Burden vs CNA Burden")
 ```
+
+# Mutation burden
+```{r}
+mut_count <- mutation_data %>%
+  group_by(sampleId) %>%
+  summarise(MutationCount = n())
+```
+
+# Fixed CNA burden
+```{r}
+cna_burden <- cna_data %>%
+  group_by(sampleId) %>%
+  summarise(CNABurden = sum(abs(as.numeric(alteration)) > 1, na.rm = TRUE))
+```
+
+# Join and plot
+```{r}
+joined <- inner_join(mut_count, cna_burden, by = "sampleId")
+
+ggplot(joined, aes(x = MutationCount, y = CNABurden)) +
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "lm", color = "firebrick") +
+  labs(title = "Mutation Burden vs CNA Burden",
+       x = "Mutation Count",
+       y = "CNA Burden (genes altered)")
+```
+
 # Example using mutation counts per gene per sampleto get PCA on muatation
 ```{r}
 mut_mat <- mutation_data %>%
@@ -292,14 +382,29 @@ pca_result <- prcomp(mut_mat[,-1], scale. = TRUE)
 plot(pca_result$x[, 1:2], col = "blue", pch = 16,
      main = "PCA of Mutation Profiles", xlab = "PC1", ylab = "PC2")
 ```
-# View the first few rows of clinical data
+#Log-transform the matrix (to reduce outlier impact)
 ```{r}
-head(clinical_data)
+mut_mat_log <- log1p(mut_mat[,-1])  # log(1 + x) to preserve 0s
+pca_result <- prcomp(mut_mat_log, scale. = TRUE)
 ```
-# Check the available columnnames
+#Remove extreme hypermutated samples
 ```{r}
-colnames(mutation_data)
+mut_counts <- rowSums(mut_mat[,-1])
+threshold <- quantile(mut_counts, 0.99)  # Keep bottom 99%
+filtered_mat <- mut_mat[mut_counts < threshold, -1]
 ```
+# Remove columns (genes) with zero variance and run PCA
+```{r}
+filtered_mat_nzv <- filtered_mat[, apply(filtered_mat, 2, var) != 0]
+pca_result <- prcomp(filtered_mat_nzv, scale. = TRUE)
+```
+# Umap
+```{r}
+library(uwot)
+umap_result <- umap(mut_mat[,-1])
+plot(umap_result, col = "blue", pch = 16)
+```
+
 # Select the Relevant clinical colunms for racial disparities
 ```{r}
 selected_demographics <- c(
@@ -337,10 +442,6 @@ selected_clinical <- c(
 ```{r}
 selected_columns <- c(selected_demographics, selected_survival, selected_clinical)
 ```
-# Check clinical data
-```{r}
-head(clinical_data)
-```
 # Reshape to Wide Format
 # Load libraries
 ```{r}
@@ -360,24 +461,7 @@ str(clinical_wide)
 summary(clinical_wide)
 colSums(is.na(clinical_wide))
 ```
-# Prepare for Survival Analysis
-# Clean survival variables
-```{r}
-clinical_wide <- clinical_wide %>%
-  mutate(
-    OS_MONTHS = as.numeric(OS_MONTHS),
-    OS_STATUS = ifelse(OS_STATUS == "DECEASED", 1, 0)
-  )
-```
-#perform Kaplan-Meier survival analysis
-```{r}
-library(survival)
-library(survminer)
 
-surv_obj <- Surv(time = clinical_wide$OS_MONTHS, event = clinical_wide$OS_STATUS)
-fit <- survfit(surv_obj ~ 1)
-ggsurvplot(fit, data = clinical_wide, risk.table = TRUE)
-```
 #Visualize Racial Disparities
 ```{r}
 ggplot(clinical_wide, aes(x = RACE, fill = RACE)) +
@@ -385,13 +469,7 @@ ggplot(clinical_wide, aes(x = RACE, fill = RACE)) +
   theme_minimal() +
   labs(title = "Race Distribution of Patients", x = "Race", y = "Count")
 ```
-#Explore Clinical Outcomes by Stage or Race
-```{r}
-ggplot(clinical_wide, aes(x = PATH_STAGE, fill = OS_STATUS)) +
-  geom_bar(position = "fill") +
-  theme_minimal() +
-  labs(title = "Survival by Pathologic Stage", y = "Proportion")
-```
+
 # 1. Filter mutation data for TP53
 ```{r}
 tp53_mut <- mutation_data %>%
@@ -427,25 +505,17 @@ ggplot(table_tp53_race, aes(x = RACE, y = Count, fill = as.factor(TP53_mutated))
        x = "Race",
        y = "Proportion")
 ```
-
-
-
-
-
-
-# Convert to a data frame for easy analysis
+# Clear env
 ```{r}
-mutation_df <- as.data.frame(mutation_data)
+rm(list = ls())      # Clear environment
 ```
-# View first few rows
+# clear console
 ```{r}
-head(mutation_df)
+cat("\014")          # Clear console (same as Ctrl+L in RStudio)
 ```
-# Select relevant columns
-```{r}
-selected_columns <- c(selected_demographics, selected_clinical, selected_survival)
-clinical_filtered <- clinical_data[, selected_columns]
-```
+
+
+
 
 
 
