@@ -1,0 +1,620 @@
+---
+title: "Advanced exploratory data analysis"
+author: "G.E.Flore"
+date: "2025-04-22"
+output: html_document
+---
+# First install package
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("cBioPortalData")
+```
+# Load it
+```{r}
+library(cBioPortalData)
+```
+# Load it
+```{r}
+library(cbioportalR)
+```
+# Connect to cbioportal
+```{r}
+cbio <- cBioPortal()
+```
+# Get studies
+```{r}
+studies <- getStudies(cbio)
+```
+#Load library
+```{r}
+library(dplyr)
+```
+# Filter for prostate cancer studies
+```{r}
+prad_studies <- studies %>% filter(grepl("prad", studyId, ignore.case = TRUE))
+View(prad_studies)
+```
+# Download prostate cancer data pack (may take a few minutes)
+```{r}
+prad_data <- cBioDataPack("prad_tcga")
+```
+
+# Load library
+```{r}
+library(MultiAssayExperiment)
+```
+# Confirm the object type and data
+```{r}
+class(prad_data)         # Should return: MultiAssayExperiment
+names(experiments(prad_data))    # Shows all available data modalities
+```
+# Extract gene expression
+```{r}
+expr <- assays(prad_data)[["mrna_seq_v2_rsem"]]
+```
+# Check dimensions (genes × samples)
+```{r}
+dim(expr)
+```
+# Preview the first few genes and samples
+```{r}
+head(expr[, 1:5])
+```
+# Extract clinical data
+```{r}
+clinical <- colData(prad_data)
+head(clinical)
+```
+# Remove genes with all 0s across samples
+```{r}
+expr_filtered <- expr[rowSums(expr) > 0, ]
+dim(expr_filtered)  # Check new dimensions
+```
+#Quick Check on Distribution of Values to see if data is log transformed
+```{r}
+summary(as.vector(expr_filtered))
+```
+# Data not log transformed so,Apply log2 transformation
+```{r}
+expr_log2 <- log2(expr_filtered + 1)
+summary(as.vector(expr_log2))  # Confirm new scale
+```
+#Scale the Data (for PCA & ML)
+# Transpose: samples as rows, genes as columns
+```{r}
+expr_t <- t(expr_log2)
+```
+# Scale: mean = 0, sd = 1 (per gene/column)
+```{r}
+expr_scaled <- scale(expr_t)
+```
+# Confirm dimensions and preview
+```{r}
+dim(expr_scaled)
+expr_scaled[1:5, 1:5]
+```
+# Run PCA
+```{r}
+pca <- prcomp(expr_scaled, center = FALSE, scale. = FALSE)
+```
+# View variance explained
+```{r}
+summary(pca)
+```
+#Let’s Prepare Clinical Info
+## Extract Gleason scores to know if it it will give us a nice range for PCA and visuslization
+```{r}
+gleason <- clinical$GLEASON_SCORE
+names(gleason) <- rownames(clinical)  # Ensure matching sample IDs
+table(gleason, useNA = "ifany")       # Check distribution
+```
+# Build a PCA dataframe
+```{r}
+pca_df <- as.data.frame(pca$x[, 1:2])  # PC1 and PC2
+pca_df$Sample <- rownames(pca_df)
+pca_df$Gleason <- as.factor(gleason[rownames(pca_df)])  # add Gleason scores
+```
+# Load ggplot2 
+```{r}
+library(ggplot2)
+```
+# Plot
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Gleason)) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "PCA of Prostate Cancer Samples (Colored by Gleason Score)",
+    x = "PC1",
+    y = "PC2"
+  )
+```
+# Fix sample ID matching: remove '-01' from expression sample IDs
+```{r}
+cleaned_sample_ids <- gsub("-01$", "", rownames(expr_scaled))
+```
+# Now match cleaned IDs to clinical data
+```{r}
+gleason_fixed <- clinical$GLEASON_SCORE[match(cleaned_sample_ids, clinical$SAMPLE_ID)]
+```
+# Create new PCA plot data frame
+```{r}
+pca_df <- as.data.frame(pca$x[, 1:2])
+pca_df$Sample <- rownames(pca_df)
+pca_df$Gleason <- as.factor(gleason_fixed)
+```
+# Plot again
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Gleason)) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "PCA of Prostate Cancer Samples (Colored by Gleason Score)",
+    x = "PC1",
+    y = "PC2"
+  )
+```
+#check the format of the sample IDs
+```{r}
+head(rownames(expr_scaled))         # From expression matrix
+head(clinical$SAMPLE_ID)            # From clinical metadata
+```
+# Direct matching using full sample IDs
+```{r}
+gleason_fixed <- clinical$GLEASON_SCORE[match(rownames(expr_scaled), clinical$SAMPLE_ID)]
+```
+# Build the PCA data frame again
+```{r}
+pca_df <- as.data.frame(pca$x[, 1:2])
+pca_df$Sample <- rownames(pca_df)
+pca_df$Gleason <- as.factor(gleason_fixed)
+```
+# Re-plot with corrected coloring
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Gleason)) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "PCA of Prostate Cancer Samples (Colored by Gleason Score)",
+    x = "PC1",
+    y = "PC2"
+  )
+```
+##Run K-means Clustering
+# Extract first 10 PCs for clustering
+```{r}
+pcs_for_clustering <- pca$x[, 1:10]
+```
+# Set number of clusters (you can test different k values)
+```{r}
+set.seed(42)
+kmeans_result <- kmeans(pcs_for_clustering, centers = 5, nstart = 25)
+```
+# Add cluster assignment to PCA dataframe
+```{r}
+pca_df$Cluster <- as.factor(kmeans_result$cluster)
+```
+# Visualize PCA with clusters
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "PCA of Prostate Cancer Samples (K-means Clusters)",
+    x = "PC1", y = "PC2"
+  )
+```
+##Compare Clusters vs Gleason Score
+# Create a table of Cluster vs Gleason Score
+```{r}
+table(Cluster = pca_df$Cluster, Gleason = pca_df$Gleason)
+```
+#Prepare the expression matrix for the heatmap
+# Use original (log2-transformed, filtered) expression matrix
+# Match samples in same order as pca_df
+```{r}
+expr_heatmap <- expr_log2[ , rownames(pca_df) ]
+```
+# Calculate variance per gene
+```{r}
+gene_vars <- apply(expr_heatmap, 1, var)
+```
+# Select top 100 most variable genes
+```{r}
+top_genes <- names(sort(gene_vars, decreasing = TRUE))[1:100]
+```
+# Subset matrix
+```{r}
+heatmap_data <- expr_heatmap[top_genes, ]
+```
+# Convert to matrix for pheatmap
+```{r}
+heatmap_mat <- as.matrix(heatmap_data)
+```
+# Create annotation dataframe for samples
+```{r}
+ann_col <- data.frame(Cluster = pca_df$Cluster)
+rownames(ann_col) <- rownames(pca_df)
+```
+# Load pheatmap
+```{r}
+if (!requireNamespace("pheatmap", quietly = TRUE)) install.packages("pheatmap")
+library(pheatmap)
+```
+# Plot heatmap
+```{r}
+pheatmap(heatmap_mat,
+         annotation_col = ann_col,
+         show_rownames = FALSE,
+         show_colnames = FALSE,
+         scale = "row",
+         fontsize = 10,
+         main = "Top 100 Variable Genes by Cluster")
+```
+#Show only top 30 variable genes
+```{r}
+top_genes_30 <- names(sort(gene_vars, decreasing = TRUE))[1:30]
+heatmap_data_30 <- expr_heatmap[top_genes_30, ]
+heatmap_mat_30 <- as.matrix(heatmap_data_30)
+
+pheatmap(heatmap_mat_30,
+         annotation_col = ann_col,
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         scale = "row",
+         fontsize = 10,
+         main = "Top 30 Variable Genes by Cluster")
+```
+#Show only a subset of representative samples
+# Randomly sample 100 samples for better visualization
+```{r}
+set.seed(123)
+sample_subset <- sample(colnames(expr_heatmap), 100)
+
+heatmap_sub <- expr_heatmap[top_genes, sample_subset]
+
+pheatmap(as.matrix(heatmap_sub),
+         annotation_col = ann_col[sample_subset, , drop=FALSE],
+         show_rownames = FALSE,
+         show_colnames = FALSE,
+         scale = "row",
+         fontsize = 10,
+         main = "Top 100 Genes in 100 Samples")
+```
+##Supervised Machine Learning
+# Convert Gleason scores to numeric
+```{r}
+gleason_num <- as.numeric(as.character(pca_df$Gleason))
+```
+# Create binary class
+```{r}
+gleason_binary <- ifelse(gleason_num <= 7, "Low", "High")
+table(gleason_binary)
+```
+#Select top 500 variable genes
+```{r}
+top_genes_500 <- names(sort(gene_vars, decreasing = TRUE))[1:500]
+expr_ml <- t(expr_log2[top_genes_500, ])  # samples as rows
+```
+# Create dataframe with features + label
+```{r}
+ml_data <- as.data.frame(expr_ml)
+ml_data$GleasonGroup <- factor(gleason_binary)
+```
+# Split: 70% training, 30% testing
+```{r}
+set.seed(123)
+train_index <- sample(seq_len(nrow(ml_data)), size = 0.7 * nrow(ml_data))
+train_data <- ml_data[train_index, ]
+test_data <- ml_data[-train_index, ]
+```
+#Train a Random Forest Model
+# Install if not already installed
+```{r}
+if (!requireNamespace("randomForest", quietly = TRUE)) install.packages("randomForest")
+library(randomForest)
+```
+# Clean column names (make them syntactically valid)
+```{r}
+colnames(train_data) <- make.names(colnames(train_data))
+colnames(test_data) <- make.names(colnames(test_data))
+```
+# Train the model to reasonably separate aggressive from non-aggressive tumors using transcriptomic signatures.
+```{r}
+set.seed(123)
+rf_model <- randomForest(
+  GleasonGroup ~ .,
+  data = train_data,
+  importance = TRUE,
+  ntree = 500
+)
+```
+# Predict and evaluate
+```{r}
+preds <- predict(rf_model, newdata = test_data)
+conf_matrix <- table(Predicted = preds, Actual = test_data$GleasonGroup)
+conf_matrix
+```
+# Accuracy
+```{r}
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+paste("Accuracy:", round(accuracy * 100, 2), "%")
+```
+# Extract and plot top 20 important genes
+# Extract importance values
+```{r}
+importance_df <- as.data.frame(importance(rf_model))
+importance_df$Gene <- rownames(importance_df)
+```
+# Sort by MeanDecreaseGini
+```{r}
+top_genes <- importance_df %>%
+  arrange(desc(MeanDecreaseGini)) %>%
+  head(20)
+```
+
+# Plot
+```{r}
+library(ggplot2)
+
+ggplot(top_genes, aes(x = reorder(Gene, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Top 20 Most Important Genes (Random Forest)",
+    x = "Gene",
+    y = "Mean Decrease Gini"
+  ) +
+  theme_minimal(base_size = 14)
+```
+#Install & run ROC/AUC analysis
+# Install pROC if needed
+```{r}
+if (!requireNamespace("pROC", quietly = TRUE)) install.packages("pROC")
+library(pROC)
+```
+# Recode the response: High = 1, Low = 0
+```{r}
+actual_binary <- ifelse(test_data$GleasonGroup == "High", 1, 0)
+```
+# Predict probabilities for class "High"
+```{r}
+rf_probs <- predict(rf_model, newdata = test_data, type = "prob")[, "High"]
+```
+# ROC curve
+```{r}
+roc_obj <- roc(actual_binary, rf_probs)
+```
+# Plot ROC
+```{r}
+plot(roc_obj, col = "darkorange", lwd = 3, main = "ROC Curve - Random Forest")
+```
+# Plot ROC and add legend in one go
+```{r}
+plot(roc_obj, col = "darkorange", lwd = 3, main = "ROC Curve - Random Forest")
+auc_val <- auc(roc_obj)
+legend("bottomright", legend = paste("AUC =", round(auc_val, 3)), col = "darkorange", lwd = 3)
+```
+#Train logistic regression
+# Use first 10 PCs from earlier PCA
+```{r}
+pcs_train <- pca$x[train_index, 1:10]
+pcs_test <- pca$x[-train_index, 1:10]
+```
+# Create dataframes for logistic model
+```{r}
+logit_train <- data.frame(pcs_train, GleasonGroup = train_data$GleasonGroup)
+logit_test <- data.frame(pcs_test, GleasonGroup = test_data$GleasonGroup)
+```
+# Fit logistic regression
+```{r}
+logit_model <- glm(GleasonGroup ~ ., data = logit_train, family = "binomial")
+```
+# Predict probabilities on test set
+```{r}
+logit_probs <- predict(logit_model, newdata = logit_test, type = "response")
+```
+# Binary actual values
+```{r}
+actual_binary <- ifelse(logit_test$GleasonGroup == "High", 1, 0)
+```
+# ROC curve
+```{r}
+library(pROC)
+logit_roc <- roc(actual_binary, logit_probs)
+plot(logit_roc, col = "blue", lwd = 3, main = "ROC Curve - Logistic Regression (Top 10 PCs)")
+logit_auc <- auc(logit_roc)
+legend("bottomright", legend = paste("AUC =", round(logit_auc, 3)), col = "blue", lwd = 3)
+```
+# Re-plot ROC with AUC in one go
+```{r}
+plot(logit_roc, col = "blue", lwd = 3, main = "ROC Curve - Logistic Regression (Top 10 PCs)")
+legend("bottomright", legend = paste("AUC =", round(logit_auc, 3)), col = "blue", lwd = 3)
+```
+#Support Vector Machine (SVM) with Radial Kernel
+# Install e1071 if not already available
+```{r}
+if (!requireNamespace("e1071", quietly = TRUE)) install.packages("e1071")
+library(e1071)
+```
+# Train SVM model on top 10 PCs
+```{r}
+svm_model <- svm(GleasonGroup ~ ., data = logit_train, kernel = "radial", probability = TRUE)
+```
+# Predict probabilities
+```{r}
+svm_pred <- predict(svm_model, newdata = logit_test, probability = TRUE)
+svm_probs <- attr(svm_pred, "probabilities")[, "High"]
+```
+# ROC + AUC
+```{r}
+svm_roc <- roc(actual_binary, svm_probs)
+plot(svm_roc, col = "purple", lwd = 3, main = "ROC Curve - SVM (Top 10 PCs)")
+svm_auc <- auc(svm_roc)
+legend("bottomright", legend = paste("AUC =", round(svm_auc, 3)), col = "purple", lwd = 3)
+```
+# Prepare a dataframe with predictions
+```{r}
+rf_export <- data.frame(
+  SampleID = rownames(test_data),
+  TrueLabel = test_data$GleasonGroup,
+  PredictedLabel = preds,
+  Prob_High = rf_probs
+)
+```
+# Save to CSV
+```{r}
+write.csv(rf_export, "rf_predictions.csv", row.names = FALSE)
+```
+# Prepare survival input for survival analysis
+# Load libraries
+```{r}
+library(survival)
+library(survminer)
+```
+# Convert OS status
+```{r}
+clinical$OS_bin <- ifelse(grepl("DECEASED", clinical$OS_STATUS), 1, 0)
+clinical$OS_time <- as.numeric(clinical$OS_MONTHS)
+```
+# Add RF prediction to clinical data
+```{r}
+clinical$PredictedRisk <- NA
+clinical[rownames(test_data), "PredictedRisk"] <- preds  # "High" or "Low"
+```
+# Create survival object
+```{r}
+surv_obj <- Surv(time = clinical$OS_time, event = clinical$OS_bin)
+```
+# Remove "-01" suffix to match clinical rownames
+```{r}
+test_ids_trimmed <- gsub("-01$", "", rownames(test_data))
+```
+# Add predictions to matching clinical rows
+```{r}
+clinical$PredictedRisk <- NA
+clinical[test_ids_trimmed, "PredictedRisk"] <- preds
+```
+# Rebuild survival object
+```{r}
+surv_obj <- Surv(time = clinical$OS_time, event = clinical$OS_bin)
+```
+# Fit Kaplan-Meier curve
+```{r}
+fit <- survfit(surv_obj ~ PredictedRisk, data = clinical)
+```
+# Plot
+```{r}
+ggsurvplot(fit,
+           data = clinical,
+           pval = TRUE,
+           risk.table = TRUE,
+           title = "Survival by Predicted Risk (Random Forest)",
+           legend.title = "Predicted Risk",
+           palette = c("steelblue", "darkorange"))
+```
+#GO and KEGG Enrichment Using clusterProfiler
+# Install and load packages
+```{r}
+if (!requireNamespace("clusterProfiler", quietly = TRUE)) install.packages("BiocManager")
+BiocManager::install(c("clusterProfiler", "org.Hs.eg.db"))
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+# Prepare gene list:get top variable genes (you already used this)
+```{r}
+top_genes <- names(sort(apply(expr_scaled, 2, var), decreasing = TRUE)[1:100])
+```
+# Convert gene symbols to gene entrez Ids
+```{r}
+entrez_genes <- bitr(top_genes, fromType = "SYMBOL", 
+                     toType = "ENTREZID", 
+                     OrgDb = org.Hs.eg.db)
+```
+# GO enrichment
+```{r}
+ego <- enrichGO(gene = entrez_genes$ENTREZID,
+                OrgDb = org.Hs.eg.db,
+                keyType = "ENTREZID",
+                ont = "BP",           # Biological Process
+                pAdjustMethod = "BH",
+                qvalueCutoff = 0.05,
+                readable = TRUE)
+```
+# Plot
+```{r}
+barplot(ego, showCategory = 15, title = "GO Enrichment - Biological Process")
+```
+# KEGG enrichment
+```{r}
+ekegg <- enrichKEGG(gene = entrez_genes$ENTREZID,
+                    organism = "hsa",     # Homo sapiens
+                    pvalueCutoff = 0.05)
+
+barplot(ekegg, showCategory = 15, title = "KEGG Pathway Enrichment")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
