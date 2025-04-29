@@ -1,0 +1,521 @@
+---
+title: "Hanneda 2nd set"
+author: "G.E.Flore"
+date: "2025-04-29"
+output: html_document
+---
+
+# install matrix
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("Matrix")
+```
+# Load essential packages
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+```
+# Read the CSV: make sure gene names are rownames
+```{r}
+raw <- read.csv("SCRHBF012.csv", row.names = 1)
+```
+# Confirm gene names are in rownames
+```{r}
+head(rownames(raw))    # Should look like: "GCLC", "CYP51A1", etc.
+head(colnames(raw))    # Should look like: barcodes or random IDs
+```
+# Create Seurat object from your raw counts
+```{r}
+seurat_obj <- CreateSeuratObject(counts = raw, project = "MyProject", min.cells = 3, min.features = 200)
+```
+# Calculate % of mitochondrial genes if it's human data (use "^mt-" if mouse)
+```{r}
+seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+```
+# Violin plots for QC
+```{r}
+VlnPlot(seurat_obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+# Check if mitochondrial genes are present at all
+```{r}
+grep("^MT-", rownames(seurat_obj), value = TRUE)
+```
+# Scatter plots to look for outliers
+```{r}
+FeatureScatter(seurat_obj, feature1 = "nCount_RNA", feature2 = "percent.mt")
+FeatureScatter(seurat_obj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+```
+# Let's Assume that this is scRNAseq data and proceed
+# Normalization and scaling
+```{r}
+seurat_obj <- NormalizeData(seurat_obj)
+seurat_obj <- FindVariableFeatures(seurat_obj)
+seurat_obj <- ScaleData(seurat_obj)
+```
+# Check how many genes and cells remain
+```{r}
+dim(GetAssayData(seurat_obj, slot = "scale.data"))
+```
+# 1. Create Seurat object with minimal filtering
+```{r}
+seurat_obj <- CreateSeuratObject(
+  counts = raw,
+  project = "MyProject",
+  min.cells = 1,      # keep any gene detected at least once
+  min.features = 0    # keep any cell with even 1 gene detected
+)
+```
+# 2. Calculate percent.mt if possible (optional)
+```{r}
+seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+```
+# 3. Normalize data
+```{r}
+seurat_obj <- NormalizeData(seurat_obj)
+```
+# 4. Find variable features (genes)
+```{r}
+seurat_obj <- FindVariableFeatures(seurat_obj, nfeatures = 2000)
+```
+# 5. Scale the data
+```{r}
+seurat_obj <- ScaleData(seurat_obj, features = VariableFeatures(seurat_obj))
+```
+# 6. Run PCA with a smaller number of PCs (since your dataset is small)
+```{r}
+seurat_obj <- RunPCA(seurat_obj, npcs = 5)
+```
+# 7. Visualize variance explained
+```{r}
+ElbowPlot(seurat_obj)
+```
+# 8. Find neighbors and clusters
+```{r}
+seurat_obj <- FindNeighbors(seurat_obj, dims = 1:5)
+seurat_obj <- FindClusters(seurat_obj, resolution = 0.5)
+```
+# 9. Run UMAP
+```{r}
+seurat_obj <- RunUMAP(seurat_obj, dims = 1:5)
+```
+# 10. Plot UMAP
+```{r}
+DimPlot(seurat_obj, reduction = "umap", label = TRUE)
+```
+# Find marker genes per cluster
+```{r}
+markers <- FindAllMarkers(seurat_obj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+head(markers)
+```
+# Top 5 markers per cluster
+```{r}
+top5 <- markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+```
+# UMAP feature plots
+```{r}
+FeaturePlot(seurat_obj, features = unique(top5$gene))
+```
+# Export markers to excel
+```{r}
+write.csv(markers, file = "cluster_markers.csv")
+```
+# View top marker for each clusters
+```{r}
+top_markers_per_cluster <- markers %>% group_by(cluster) %>% top_n(n = 1, wt = avg_log2FC)
+top_markers_per_cluster %>% select(cluster, gene, avg_log2FC)
+```
+# Swicth back to seurat original clustering
+```{r}
+Idents(seurat_obj) <- "seurat_clusters"
+```
+#Re-run marker detection for the 3 clusters
+```{r}
+markers <- FindAllMarkers(seurat_obj, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.1)
+```
+# Use these new markers to annotate clusters
+```{r}
+top_markers <- markers %>%
+  group_by(cluster) %>%
+  top_n(n = 1, wt = avg_log2FC)
+
+top_markers %>% select(cluster, gene, avg_log2FC)
+```
+# Rename clusters
+```{r}
+new.cluster.ids <- c("lncRNA-high cells", "Ribosomal pseudogene-high", "Ribosomal protein-high")
+names(new.cluster.ids) <- levels(seurat_obj)
+seurat_obj <- RenameIdents(seurat_obj, new.cluster.ids)
+```
+# Plot final labeled UMAP
+```{r}
+DimPlot(seurat_obj, reduction = "umap", label = TRUE, repel = TRUE) +
+  ggtitle("UMAP with Annotated Seurat Clusters")
+```
+# Let's try to run GO/KEGG enrichment pathaways
+# Load the necessary libraries
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(dplyr)
+```
+# Get top 50 markers per cluster for enrichment
+```{r}
+top_markers <- markers %>%
+  group_by(cluster) %>%
+  top_n(n = 50, wt = avg_log2FC)
+```
+# Example for Cluster 0
+```{r}
+genes_cluster0 <- top_markers %>% filter(cluster == 0) %>% pull(gene)
+```
+# Convert gene symbols to Entrez IDs
+```{r}
+entrez_cluster0 <- bitr(genes_cluster0, fromType = "SYMBOL",
+                        toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+```
+# GO biological process
+```{r}
+go_cluster0 <- enrichGO(gene = entrez_cluster0$ENTREZID,
+                        OrgDb = org.Hs.eg.db,
+                        keyType = "ENTREZID",
+                        ont = "BP",
+                        pAdjustMethod = "BH",
+                        qvalueCutoff = 0.05)
+```
+# KEGG
+```{r}
+kegg_cluster0 <- enrichKEGG(gene = entrez_cluster0$ENTREZID,
+                            organism = 'hsa',
+                            pvalueCutoff = 0.05)
+```
+# Visualize enrichment
+```{r}
+dotplot(go_cluster0, showCategory = 10) + ggtitle("GO BP - Cluster 0")
+dotplot(kegg_cluster0, showCategory = 10) + ggtitle("KEGG Pathways - Cluster 0")
+```
+### Do GO and KEGG for cluster 1 and 2 for more\ biological meaning
+#Heatmap of Top Marker Genes
+```{r}
+top10 <- markers %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC)
+```
+# Plot heatmap
+```{r}
+DoHeatmap(seurat_obj, features = unique(top10$gene)) +
+  theme(axis.text.y = element_text(size = 6)) +
+  ggtitle("Top 10 Marker Genes per Cluster")
+```
+
+#### Repeat the whole process
+# Let's recreate a seurat object with stricter filtering
+```{r}
+seurat_obj <- CreateSeuratObject(
+  counts = raw,
+  min.cells = 3,           # Gene must be present in at least 3 cells
+  min.features = 200,      # Cell must express at least 200 genes
+  project = "Filtered"
+)
+```
+# Add mitochondrial content
+```{r}
+seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+```
+# Filter low quality cells
+```{r}
+seurat_obj <- subset(seurat_obj,
+                     subset = nFeature_RNA > 100 &
+                              nFeature_RNA < 7000)
+```
+# Detect mitochondrial gene naming convention
+```{r}
+human_mt <- grep("^MT-", rownames(seurat_obj), value = TRUE)
+mouse_mt <- grep("^mt-", rownames(seurat_obj), value = TRUE)
+```
+# Print result
+```{r}
+cat("Human MT genes found:", length(human_mt), "\n")
+cat("Mouse mt genes found:", length(mouse_mt), "\n")
+```
+# Create Seurat object with basic filtering at input since mti is o
+```{r}
+seurat_obj <- CreateSeuratObject(
+  counts = raw,
+  min.cells = 3,
+  min.features = 100,
+  project = "Filtered_NoMT"
+)
+```
+#Proceed with basic feature filtering
+```{r}
+seurat_obj <- subset(seurat_obj,
+                     subset = nFeature_RNA > 100 & nFeature_RNA < 7000)
+```
+# Normalize and scale
+```{r}
+seurat_obj <- NormalizeData(seurat_obj)
+seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = 2000)
+seurat_obj <- ScaleData(seurat_obj, features = VariableFeatures(seurat_obj))
+```
+# PCA and elbow
+```{r}
+seurat_obj <- RunPCA(seurat_obj)
+ElbowPlot(seurat_obj)
+```
+# Clustering
+```{r}
+seurat_obj <- FindNeighbors(seurat_obj, dims = 1:10)
+seurat_obj <- FindClusters(seurat_obj, resolution = 0.5)
+seurat_obj <- RunUMAP(seurat_obj, dims = 1:10)
+DimPlot(seurat_obj, reduction = "umap", label = TRUE, repel = TRUE)
+```
+# Find markers
+```{r}
+markers <- FindAllMarkers(seurat_obj, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.25)
+```
+#Load dyplr
+```{r}
+library(dplyr)
+library(tidyverse)
+```
+# Extract top 5 markers per cluster
+```{r}
+top5 <- markers %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::top_n(n = 5, wt = avg_log2FC) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(cluster, gene, avg_log2FC)
+```
+# View
+```{r}
+View(top5)
+```
+# Assign new cluster labels
+```{r}
+new.cluster.ids <- c("Erythroid-like", "Immune-active", "Proliferative")
+names(new.cluster.ids) <- levels(seurat_obj)
+seurat_obj <- RenameIdents(seurat_obj, new.cluster.ids)
+```
+# Replot UMAP
+```{r}
+DimPlot(seurat_obj, reduction = "umap", label = TRUE, repel = TRUE) +
+  ggtitle("UMAP with Annotated Clusters (Based on Top 5 Markers)")
+```
+#GO & KEGG Pathway Enrichment: Cluster 0
+# Top genes for cluster 0
+```{r}
+cluster0_genes <- markers %>%
+  dplyr::filter(cluster == 0) %>%
+  dplyr::top_n(n = 50, wt = avg_log2FC) %>%
+  dplyr::pull(gene)
+```
+# Convert gene symbols to Entrez IDs
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+cluster0_entrez <- bitr(cluster0_genes,
+                        fromType = "SYMBOL",
+                        toType = "ENTREZID",
+                        OrgDb = org.Hs.eg.db)
+```
+# GO cluster 0 with relaxed threshold
+```{r}
+go_cluster0 <- enrichGO(
+  gene = cluster0_entrez$ENTREZID,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENTREZID",
+  ont = "BP",
+  pvalueCutoff = 0.1,
+  qvalueCutoff = 0.2,
+  readable = TRUE
+)
+```
+# KEGG enrichment
+```{r}
+kegg_cluster0 <- enrichKEGG(gene = cluster0_entrez$ENTREZID,
+                            organism = 'hsa',
+                            pvalueCutoff = 0.2)
+```
+# Visualize GO
+```{r}
+dotplot(go_cluster0, showCategory = 10)
+```
+# Visualize KEGG
+```{r}
+dotplot(kegg_cluster0, showCategory = 10) +
+  ggtitle("KEGG Pathway Enrichment - Cluster 0")
+```
+# Extract top marker per cluster
+```{r}
+top10 <- markers %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::top_n(n = 10, wt = avg_log2FC) %>%
+  dplyr::ungroup()
+```
+# Plot haetmap
+```{r}
+DoHeatmap(seurat_obj, features = unique(top10$gene)) +
+  ggtitle("Top 10 Marker Genes per Cluster") +
+  theme(axis.text.y = element_text(size = 6))
+```
+### Do all the above step with cluster 1 and then cluster 2
+
+## Set cluster identities to custum labels for DEGs
+```{r}
+Idents(seurat_obj) <- factor(Idents(seurat_obj), 
+                             levels = c("Erythroid-like", "Immune-active", "Proliferative"))
+```
+# Run pairwise comparison
+```{r}
+deg_immune_vs_prolif <- FindMarkers(seurat_obj,
+                                     ident.1 = "Immune-active",
+                                     ident.2 = "Proliferative",
+                                     min.pct = 0.25,
+                                     logfc.threshold = 0.25)
+```
+# View
+```{r}
+head(deg_immune_vs_prolif[order(deg_immune_vs_prolif$avg_log2FC, decreasing = TRUE), ])
+```
+# Save the results
+```{r}
+write.csv(deg_immune_vs_prolif, "DEGs_Immune_vs_Proliferative.csv")
+```
+# Visualization
+# Add gene names as a column
+```{r}
+deg_immune_vs_prolif$gene <- rownames(deg_immune_vs_prolif)
+```
+# Load ggplot2
+```{r}
+library(ggplot2)
+```
+# Create volcano plot
+```{r}
+ggplot(deg_immune_vs_prolif, aes(x = avg_log2FC, y = -log10(p_val_adj))) +
+  geom_point(alpha = 0.6) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "red") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
+  ggtitle("Volcano Plot: Immune-active vs Proliferative") +
+  xlab("Log2 Fold Change") +
+  ylab("-Log10 Adjusted P-value") +
+  theme_minimal()
+```
+# Enhanced volcano plot
+# Libraries
+```{r}
+library(ggplot2)
+library(ggrepel)
+```
+# Add columns to flag significance
+```{r}
+deg_immune_vs_prolif$gene <- rownames(deg_immune_vs_prolif)
+deg_immune_vs_prolif$log10_pval <- -log10(deg_immune_vs_prolif$p_val_adj)
+deg_immune_vs_prolif$significance <- "NS"  # Not significant
+```
+# Flag up/downregulated
+```{r}
+deg_immune_vs_prolif$significance[deg_immune_vs_prolif$avg_log2FC > 1 & deg_immune_vs_prolif$p_val_adj < 0.05] <- "Up"
+deg_immune_vs_prolif$significance[deg_immune_vs_prolif$avg_log2FC < -1 & deg_immune_vs_prolif$p_val_adj < 0.05] <- "Down"
+```
+# Get top genes for labeling
+```{r}
+top_genes <- deg_immune_vs_prolif %>%
+  dplyr::filter(significance != "NS") %>%
+  dplyr::arrange(desc(log10_pval)) %>%
+  dplyr::slice_head(n = 10)
+```
+# Volcano plot
+```{r}
+ggplot(deg_immune_vs_prolif, aes(x = avg_log2FC, y = log10_pval, color = significance)) +
+  geom_point(alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("Up" = "red", "Down" = "blue", "NS" = "grey")) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  ggrepel::geom_text_repel(data = top_genes,
+                           aes(label = gene),
+                           size = 3,
+                           max.overlaps = 10) +
+  labs(title = "Enhanced Volcano Plot: Immune-active vs Proliferative",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+
+# Pick top upregulated and downregulated genes
+```{r}
+top_up <- rownames(head(deg_immune_vs_prolif[order(deg_immune_vs_prolif$avg_log2FC, decreasing = TRUE), ], 3))
+top_down <- rownames(head(deg_immune_vs_prolif[order(deg_immune_vs_prolif$avg_log2FC), ], 3))
+```
+# Violin plots
+```{r}
+VlnPlot(seurat_obj, features = top_up, pt.size = 0.1)
+VlnPlot(seurat_obj, features = top_down, pt.size = 0.1)
+```
+# Features plots
+```{r}
+FeaturePlot(seurat_obj, features = c(top_up, top_down))
+```
+### use this same format to check for DEGs Erythroid-like vs Proliferative to gain more understanding
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
