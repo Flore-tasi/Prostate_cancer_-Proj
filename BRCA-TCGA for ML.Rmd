@@ -1,0 +1,525 @@
+---
+title: "BRCA_TCGA data for ML"
+author: "G.E.Flore"
+date: "2025-06-04"
+output: html_document
+---
+
+# Load tidyverse
+```{r}
+library(tidyverse)
+```
+# Load Expression data
+```{r}
+expr <- read.delim("brca_tcga_pan_can_atlas_2018/data_mrna_seq_v2_rsem.txt", check.names = FALSE)
+expr[,1] <- make.unique(expr[,1])
+rownames(expr) <- expr[,1]
+expr <- expr[,-1]
+expr <- as.data.frame(t(expr))
+expr$Sample_ID <- rownames(expr)
+```
+# Load both clinical files
+```{r}
+clin_patient <- read.delim("brca_tcga_pan_can_atlas_2018/data_clinical_patient.txt", check.names = FALSE, stringsAsFactors = FALSE)
+clin_sample  <- read.delim("brca_tcga_pan_can_atlas_2018/data_clinical_sample.txt",  check.names = FALSE, stringsAsFactors = FALSE)
+```
+# Rename the shared identifier column to a clean name
+```{r}
+colnames(clin_patient)[1] <- "PATIENT_ID"
+colnames(clin_sample)[1]  <- "PATIENT_ID"
+```
+# Merge the clinical data on PATIENT_ID
+```{r}
+clin <- merge(clin_patient, clin_sample, by = "PATIENT_ID", all = TRUE)
+```
+# check olumn names after merging
+```{r}
+colnames(clin)
+```
+#Create TNBC Label Using Subtype
+```{r}
+library(dplyr)
+
+clin <- clin %>%
+  mutate(TNBC = ifelse(Subtype == "BRCA_Basal", 1, 0)) %>%
+  drop_na(Subtype)
+```
+#Merge Clinical with Expression Data
+```{r}
+final_data <- inner_join(expr, clin, by = c("Sample_ID" = "Sample Identifier"))
+```
+# Clean data
+```{r}
+expr_only <- final_data %>%
+  select(-Sample_ID, -Subtype, -PATIENT_ID, -`TCGA PanCanAtlas Cancer Type Acronym`, -TNBC)
+
+labels <- final_data$TNBC
+```
+# Filter top variable genes
+```{r}
+top_var_genes <- apply(expr_only, 2, var)
+expr_filtered <- expr_only[, order(top_var_genes, decreasing = TRUE)[1:1000]]
+```
+# Sanity check
+```{r}
+dim(expr_filtered)
+summary(expr_filtered[,1:5])
+```
+# Extract Sample_IDs
+```{r}
+sample_ids <- rownames(expr_filtered)
+```
+# Create a lookup from final_data
+```{r}
+label_df <- final_data[, c("Sample_ID", "TNBC")]
+```
+# Match labels using sample ID
+```{r}
+labels <- label_df$TNBC[match(sample_ids, label_df$Sample_ID)]
+```
+# Convert to factor
+```{r}
+labels <- as.factor(labels)
+```
+# Check result
+```{r}
+table(labels)
+```
+# Check sample IDs
+```{r}
+head(rownames(expr_filtered))
+head(final_data$Sample_ID)
+```
+# Update rownames of expr_filtered
+```{r}
+rownames(expr_filtered) <- final_data$Sample_ID
+```
+# Let's rerun
+```{r}
+labels <- final_data$TNBC[match(rownames(expr_filtered), final_data$Sample_ID)]
+labels <- as.factor(labels)
+table(labels)
+```
+## let's build a clssifier
+# Train-Test Split
+```{r}
+library(caret)
+set.seed(42)
+
+split <- createDataPartition(labels, p = 0.8, list = FALSE)
+train_x <- expr_filtered[split, ]
+train_y <- labels[split]
+test_x  <- expr_filtered[-split, ]
+test_y  <- labels[-split]
+```
+# Train a Random Forest
+```{r}
+library(randomForest)
+
+rf_model <- randomForest(x = train_x, y = train_y, ntree = 500, importance = TRUE)
+
+# Predict on test set
+pred_rf <- predict(rf_model, test_x)
+
+# Confusion matrix
+confusionMatrix(pred_rf, test_y)
+```
+#Plot ROC Curve
+```{r}
+library(pROC)
+prob_rf <- predict(rf_model, test_x, type = "prob")[, 2]
+roc_rf <- roc(test_y, prob_rf)
+plot(roc_rf, col = "blue", print.auc = TRUE, main = "ROC Curve - TNBC Classifier")
+```
+#Extract Top Predictive Genes (Biomarkers)
+```{r}
+imp <- importance(rf_model)
+top_genes <- rownames(imp)[order(imp[, "MeanDecreaseGini"], decreasing = TRUE)[1:20]]
+top_genes
+```
+#Visualize Top Gene Expression
+```{r}
+gene <- top_genes[1]
+boxplot(expr_filtered[, gene] ~ labels, main = paste("Expression of", gene), xlab = "TNBC Status", ylab = "Expression")
+```
+# Repeat boxplot for top 10 -20 genes
+```{r}
+for (gene in top_genes[1:5]) {
+  boxplot(expr_filtered[, gene] ~ labels,
+          main = paste("Expression of", gene),
+          ylab = "Expression", xlab = "TNBC Status",
+          col = "gray")
+}
+```
+#Violin Plot for a Top Gene (e.g., SPDEF)
+# Load required libraries
+```{r}
+library(ggplot2)
+library(ggpubr)
+```
+# Define your gene of interest
+```{r}
+gene <- "SPDEF"
+```
+# Create a plotting dataframe
+```{r}
+plot_df <- data.frame(
+  Expression = expr_filtered[, gene],
+  TNBC_Status = labels
+)
+```
+# Create violin plot with boxplot and significance star
+```{r}
+ggviolin(plot_df, x = "TNBC_Status", y = "Expression", fill = "TNBC_Status",
+         palette = c("#00BFC4", "#F8766D"),  # blue for 0, red for 1
+         add = "boxplot", add.params = list(fill = "white")) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif") +
+  labs(title = paste("Expression of", gene),
+       x = "TNBC Status", y = "Expression") +
+  theme_minimal()
+```
+# for top 5-10 markers
+```{r}
+for (gene in top_genes[1:5]) {
+  plot_df <- data.frame(Expression = expr_filtered[, gene], TNBC_Status = labels)
+  print(
+    ggviolin(plot_df, x = "TNBC_Status", y = "Expression", fill = "TNBC_Status",
+             palette = c("#00BFC4", "#F8766D"), add = "boxplot",
+             add.params = list(fill = "white")) +
+      stat_compare_means(method = "wilcox.test", label = "p.signif") +
+      labs(title = paste("Expression of", gene),
+           x = "TNBC Status", y = "Expression") +
+      theme_minimal()
+  )
+}
+```
+## heat map of top 20 genes
+```{r}
+install.packages("pheatmap")  # if not already installed
+library(pheatmap)
+```
+# Select top 20 genes by importance
+```{r}
+top20_genes <- rownames(importance(rf_model))[order(importance(rf_model)[, "MeanDecreaseGini"], decreasing = TRUE)[1:20]]
+```
+# Subset expression matrix to top 20 genes
+```{r}
+heatmap_data <- t(expr_filtered[, top20_genes])  # genes in rows, samples in columns
+```
+# Create annotation for TNBC status
+```{r}
+annotation_col <- data.frame(TNBC_Status = labels)
+rownames(annotation_col) <- rownames(expr_filtered)
+```
+# Plot the heatmap
+```{r}
+pheatmap(heatmap_data,
+         annotation_col = annotation_col,
+         show_rownames = TRUE,
+         show_colnames = FALSE,
+         scale = "row",  # standardize each gene (row-wise)
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         main = "Top 20 Predictive Genes Across TNBC and non-TNBC Samples",
+         cluster_cols = TRUE,
+         cluster_rows = TRUE)
+```
+#Install and load required packages
+```{r}
+install.packages("ggpubr")
+install.packages("patchwork")
+
+library(ggpubr)
+library(patchwork)
+```
+# Select the top 4 genes
+```{r}
+selected_genes <- top_genes[1:4]
+```
+# Create violin plots for each gene
+```{r}
+plots <- lapply(selected_genes, function(gene) {
+  df <- data.frame(Expression = expr_filtered[, gene], TNBC_Status = labels)
+  
+  ggviolin(df, x = "TNBC_Status", y = "Expression", fill = "TNBC_Status",
+           palette = c("#00BFC4", "#F8766D"), add = "boxplot",
+           add.params = list(fill = "white")) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif") +
+    labs(title = gene, x = NULL, y = "Expression") +
+    theme_minimal()
+})
+```
+# Combine plots into a 2x2 layout
+```{r}
+(plots[[1]] | plots[[2]]) /
+(plots[[3]] | plots[[4]])
+```
+##Train an XGBoost Classifier
+# Load required packages
+```{r}
+install.packages("xgboost")
+library(xgboost)
+```
+# Prepare data for XGBOOST
+# Convert data to matrix and labels to numeric
+```{r}
+xgb_train <- as.matrix(train_x)
+xgb_test  <- as.matrix(test_x)
+xgb_label_train <- as.numeric(as.character(train_y))
+xgb_label_test  <- as.numeric(as.character(test_y))
+```
+Train the XGBoost Model
+```{r}
+xgb_model <- xgboost(
+  data = xgb_train,
+  label = xgb_label_train,
+  nrounds = 100,
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  verbose = 0
+)
+```
+# Predict probabilities
+```{r}
+xgb_prob <- predict(xgb_model, xgb_test)
+```
+# Convert probabilities to class labels
+```{r}
+xgb_pred <- ifelse(xgb_prob > 0.5, 1, 0)
+```
+# Confusion matrix
+```{r}
+library(caret)
+confusionMatrix(as.factor(xgb_pred), as.factor(xgb_label_test))
+```
+# ROC Curve
+```{r}
+library(pROC)
+xgb_roc <- roc(xgb_label_test, xgb_prob)
+plot(xgb_roc, col = "darkgreen", print.auc = TRUE, main = "ROC Curve - XGBoost Classifier")
+```
+# Get feature importance
+```{r}
+importance_matrix <- xgb.importance(model = xgb_model)
+```
+# Select top 20 genes
+```{r}
+top20_xgb_genes <- importance_matrix$Feature[1:20]
+top20_xgb_genes
+```
+# Generate violin + boxplots for top 4 genes
+```{r}
+selected_genes <- top20_xgb_genes[1:4]
+
+violin_plots <- lapply(selected_genes, function(gene) {
+  df <- data.frame(Expression = expr_filtered[, gene], TNBC_Status = labels)
+  
+  ggviolin(df, x = "TNBC_Status", y = "Expression", fill = "TNBC_Status",
+           palette = c("#00BFC4", "#F8766D"), add = "boxplot",
+           add.params = list(fill = "white")) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif") +
+    labs(title = gene, x = "TNBC Status", y = "Expression") +
+    theme_minimal()
+})
+```
+# Combine into a 2x2 layout
+```{r}
+multi_violin_plot <- (violin_plots[[1]] | violin_plots[[2]]) /
+                     (violin_plots[[3]] | violin_plots[[4]])
+```
+
+# Display
+```{r}
+multi_violin_plot
+```
+# Prepare heatmap data
+```{r}
+heatmap_data_xgb <- t(expr_filtered[, top20_xgb_genes])
+```
+# Annotation
+```{r}
+annotation_col <- data.frame(TNBC_Status = labels)
+rownames(annotation_col) <- rownames(expr_filtered)
+```
+# Draw heatmap
+```{r}
+pheatmap(heatmap_data_xgb,
+         annotation_col = annotation_col,
+         scale = "row",
+         show_colnames = FALSE,
+         show_rownames = TRUE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         main = "Top 20 Predictive Genes from XGBoost")
+```
+# optional figure
+```{r}
+ggsave("xgb_top4_violin.png", plot = multi_violin_plot, width = 12, height = 8, dpi = 300)
+```
+# Load required libraries
+```{r}
+library(e1071)
+library(caret)
+```
+# Train SVM with radial kernel
+```{r}
+svm_model <- svm(train_x, train_y, kernel = "radial", probability = TRUE)
+```
+# Predict on test set
+```{r}
+svm_pred <- predict(svm_model, test_x)
+```
+# Confusion matrix
+```{r}
+confusionMatrix(svm_pred, test_y)
+```
+# Predict probabilities
+```{r}
+svm_prob <- attr(predict(svm_model, test_x, probability = TRUE), "probabilities")[,2]
+```
+# ROC and AUC
+```{r}
+library(pROC)
+svm_roc <- roc(as.numeric(as.character(test_y)), svm_prob)
+```
+# Plot ROC curve
+```{r}
+plot(svm_roc, col = "purple", main = "ROC Curve - SVM", print.auc = TRUE)
+```
+# Ensure TRain_X is numeric or dataframe
+```{r}
+str(train_x)
+```
+# Reload the libraries
+```{r}
+library(caret)
+library(kernlab)
+```
+# check class distribution
+```{r}
+table(train_y)
+```
+# Updated working code sine train-y is imbalanced
+```{r}
+library(caret)
+library(kernlab)
+
+set.seed(123)
+
+# Ensure class labels are factors
+train_y <- as.factor(train_y)
+```
+# Train the SVM model directly
+```{r}
+svm_model <- train(
+  x = train_x,
+  y = train_y,
+  method = "svmRadial",
+  preProcess = c("center", "scale"),
+  trControl = trainControl(method = "cv", number = 5)
+)
+```
+# Check class and structure
+```{r}
+importance <- varImp(svm_model)
+print(class(importance))       # Should include "varImp.train"
+print(names(importance))       # Should include "importance"
+str(importance)
+```
+# Extract the importance table
+```{r}
+imp_df <- importance$importance
+```
+# Compute average importance score across both classes
+```{r}
+imp_df$Overall <- rowMeans(imp_df)
+```
+# Extract top 20 genes by overall importance
+```{r}
+top_genes <- rownames(imp_df)[order(imp_df$Overall, decreasing = TRUE)[1:20]]
+print(top_genes)
+```
+# Prepare data for plotting
+```{r}
+# Subset and prepare your training data
+genes_of_interest <- c("MLPH", "FOXA1", "XBP1", "KPNA2")
+subset_data <- train_x[, genes_of_interest]
+subset_data$TNBC <- factor(train_y, labels = c("Non-TNBC", "TNBC"))
+```
+# Create individual ggplot objects
+```{r}
+gene_plots <- lapply(genes_of_interest, function(gene) {
+  ggplot(subset_data, aes_string(x = "TNBC", y = gene, fill = "TNBC")) +
+    geom_violin(trim = FALSE, alpha = 0.6) +
+    geom_boxplot(width = 0.1, outlier.shape = NA) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif") +
+    theme_minimal() +
+    labs(title = gene, x = "", y = "Expression") +
+    theme(legend.position = "none",
+          plot.title = element_text(size = 12, face = "bold"))
+})
+```
+# Combine into one panel (2x2 layout)
+```{r}
+combined_panel <- (gene_plots[[1]] | gene_plots[[2]]) / (gene_plots[[3]] | gene_plots[[4]])
+```
+# Display
+```{r}
+combined_panel
+```
+# Subset expression data for these genes
+```{r}
+heatmap_data <- train_x[, top_genes]
+```
+# Optional: Z-score normalization per gene (standard practice in heatmaps)
+```{r}
+heatmap_scaled <- t(scale(t(heatmap_data)))
+```
+# Create annotation for TNBC vs non-TNBC
+```{r}
+annotation <- data.frame(TNBC = factor(train_y, labels = c("Non-TNBC", "TNBC")))
+rownames(annotation) <- rownames(heatmap_scaled)
+```
+# Plot the heatmap
+```{r}
+pheatmap(
+  mat = heatmap_scaled,
+  annotation_row = annotation,
+  show_rownames = FALSE,
+  show_colnames = TRUE,
+  fontsize = 10,
+  clustering_method = "ward.D2",
+  scale = "none",
+  main = "Heatmap of Top 20 SVM Genes"
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
